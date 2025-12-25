@@ -30,43 +30,23 @@ export function formatFileSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-export function getStageColorClasses(stageId: StageId): {
+export function getStageColorClasses(stageId: StageId, colorVariant?: 'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost' | 'stage-purple' | 'stage-teal' | 'stage-indigo' | 'stage-pink' | 'stage-orange'): {
   bg: string;
   text: string;
   bgLight: string;
   border: string;
 } {
-  const colors: Record<StageId, { bg: string; text: string; bgLight: string; border: string }> = {
-    new: {
-      bg: 'bg-stage-new',
-      text: 'text-stage-new',
-      bgLight: 'bg-stage-new-bg',
-      border: 'border-stage-new/30',
-    },
-    called: {
-      bg: 'bg-stage-called',
-      text: 'text-stage-called',
-      bgLight: 'bg-stage-called-bg',
-      border: 'border-stage-called/30',
-    },
-    onboard: {
-      bg: 'bg-stage-onboard',
-      text: 'text-stage-onboard',
-      bgLight: 'bg-stage-onboard-bg',
-      border: 'border-stage-onboard/30',
-    },
-    live: {
-      bg: 'bg-stage-live',
-      text: 'text-stage-live',
-      bgLight: 'bg-stage-live-bg',
-      border: 'border-stage-live/30',
-    },
-    lost: {
-      bg: 'bg-stage-lost',
-      text: 'text-stage-lost',
-      bgLight: 'bg-stage-lost-bg',
-      border: 'border-stage-lost/30',
-    },
+  const variant = colorVariant ?? ({
+    new: 'stage-new',
+    called: 'stage-called',
+    onboard: 'stage-onboard',
+    live: 'stage-live',
+    lost: 'stage-lost',
+  }[stageId]);
+  return {
+    bg: `bg-${variant}`,
+    text: `text-${variant}`,
+    bgLight: `bg-${variant}-bg`,
+    border: `border-${variant}/30`,
   };
-  return colors[stageId];
 }

@@ -1,19 +1,25 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Instagram, Calendar, Phone, Globe, User, FileText, Upload,
   Clock, ArrowRight, MessageSquare, Paperclip, ExternalLink
 } from 'lucide-react';
-import { LeadCard, Stage, TeamMember, StageId } from '@/types/pipeline';
+import { LeadCard, Stage, TeamMember, StageId, FileAttachment } from '@/types/pipeline';
 import { getRunningDays, formatRunningDays, formatFollowers, formatFileSize, getStageColorClasses } from '@/lib/pipeline-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MemberAvatar } from './MemberAvatar';
 import { StageBadge } from './StageBadge';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { getTags, setTags, getPipelineActivityPhases, pushNotificationForUser } from '@/lib/settings';
+import { useParams, useLocation } from 'react-router-dom';
+import { getSubscriptionTiers } from '@/lib/settings';
 import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface CardDetailPanelProps {
   card: LeadCard;
@@ -22,6 +28,9 @@ interface CardDetailPanelProps {
   currentUser: TeamMember;
   onClose: () => void;
   onUpdate: (cardId: string, updates: Partial<LeadCard>) => void;
+  onSave?: (card: LeadCard) => void;
+  isDraft?: boolean;
+  sectionsByStage?: Record<string, { id: string; name: string; color: string }[]>;
 }
 
 export function CardDetailPanel({
@@ -31,38 +40,173 @@ export function CardDetailPanel({
   currentUser,
   onClose,
   onUpdate,
+  onSave,
+  isDraft = false,
+  sectionsByStage,
 }: CardDetailPanelProps) {
+  const { pipelineId = 'default' } = useParams();
   const [newNote, setNewNote] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
+  const [tagInput, setTagInput] = useState('');
+  const allTags = getTags();
+  const tagSuggestions = allTags.filter(t => t.toLowerCase().includes(tagInput.toLowerCase())).filter(t => !(card.tags || []).includes(t)).slice(0, 5);
+  const activityPhases = getPipelineActivityPhases(pipelineId);
+  const [dealInput, setDealInput] = useState<string>(() => (card.dealValue ?? 0).toLocaleString());
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionOptions, setMentionOptions] = useState<TeamMember[]>([]);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const renderNoteWithMentions = (text: string) => {
+    const nodes: any[] = [];
+    let idx = 0;
+    const regex = /@([A-Za-z0-9._-]+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text))) {
+      const before = text.slice(idx, match.index);
+      if (before) nodes.push(before);
+      const token = match[1];
+      const member = teamMembers.find(m => m.name.toLowerCase() === token.toLowerCase() || ((m.email || '').split('@')[0].toLowerCase() === token.toLowerCase()));
+      nodes.push(
+        <span key={`m-${match.index}`} className="text-primary font-semibold">
+          @{member ? member.name : token}
+        </span>
+      );
+      idx = match.index + match[0].length;
+    }
+    const after = text.slice(idx);
+    if (after) nodes.push(after);
+    return nodes;
+  };
+  useEffect(() => {
+    setDealInput((card.dealValue ?? 0).toLocaleString());
+  }, [card.dealValue]);
+
+  const handleActivityPhaseChange = (phase: string) => {
+    const oldPhase = card.activityPhase || '';
+    const newPhase = phase;
+    onUpdate(card.id, {
+      activityPhase: newPhase,
+      history: [
+        ...card.history,
+        {
+          id: uid(),
+          type: 'activity_phase_change',
+          timestamp: new Date(),
+          user: currentUser,
+          details: { from: oldPhase, to: newPhase },
+        },
+      ],
+    });
+  };
   const runningDays = getRunningDays(card.startDate);
   const currentStage = stages.find(s => s.id === card.stageId);
-  const stageColors = getStageColorClasses(card.stageId);
+  const stageColors = getStageColorClasses(card.stageId, currentStage?.color as any);
+  const availableSections = (sectionsByStage && sectionsByStage[card.stageId]) ? sectionsByStage[card.stageId] : [];
+  const uid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const location = useLocation();
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [focusEventId, setFocusEventId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const noteParam = params.get('note');
+    let targetId: string | null = null;
+    if (noteParam) {
+      const evt = card.history.find(e => e.type === 'note_added' && e.details && (e.details as any).note === noteParam);
+      if (evt) targetId = evt.id;
+    }
+    if (!targetId) {
+      const local = (currentUser.email || '').split('@')[0];
+      const tokens = [currentUser.name, local].filter(Boolean).map(x => `@${String(x)}`.toLowerCase());
+      const evt = card.history.find(e => e.type === 'note_added' && e.details && tokens.some(t => String((e.details as any).note || '').toLowerCase().includes(t)));
+      if (evt) targetId = evt.id;
+    }
+    if (targetId) {
+      setFocusEventId(targetId);
+      const el = itemRefs.current[targetId];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [location.search, card.history, currentUser]);
 
   const handleTakeCard = () => {
-    onUpdate(card.id, { assignedTo: currentUser });
+    onUpdate(card.id, {
+      assignedTo: currentUser,
+      history: [
+        ...card.history,
+        {
+          id: uid(),
+          type: 'assignment_change',
+          timestamp: new Date(),
+          user: currentUser,
+          details: { to: currentUser.name },
+        },
+      ],
+    });
   };
 
   const handleAddNote = () => {
-    if (!newNote.trim()) return;
+    if (!newNote.trim() && attachments.length === 0) return;
     const note = {
-      id: `note-${Date.now()}`,
+      id: uid(),
       content: newNote,
       createdAt: new Date(),
       createdBy: currentUser,
     };
+    const getFileType = (file: File): 'image' | 'document' | 'other' => {
+      if (file.type.startsWith('image/')) return 'image';
+      if (file.type.includes('pdf') || file.type.includes('msword') || file.type.includes('officedocument')) return 'document';
+      return 'other';
+    };
+    const newFiles = attachments.map((file) => ({
+      id: uid(),
+      name: file.name,
+      url: URL.createObjectURL(file),
+      type: getFileType(file),
+      size: file.size,
+      uploadedAt: new Date(),
+      uploadedBy: currentUser,
+    }));
+    const historyItems = [
+      newNote.trim()
+        ? {
+            id: uid(),
+            type: 'note_added' as const,
+            timestamp: new Date(),
+            user: currentUser,
+            details: { note: newNote },
+          }
+        : null,
+      ...newFiles.map((f) => ({
+        id: uid(),
+        type: 'file_added' as const,
+        timestamp: new Date(),
+        user: currentUser,
+        details: { fileName: f.name },
+      })),
+    ].filter(Boolean) as typeof card.history;
     onUpdate(card.id, {
-      notes: [...card.notes, note],
-      history: [
-        ...card.history,
-        {
-          id: `hist-${Date.now()}`,
-          type: 'note_added' as const,
-          timestamp: new Date(),
-          user: currentUser,
-          details: { note: newNote },
-        },
-      ],
+      notes: newNote.trim() ? [...card.notes, note] : card.notes,
+      files: [...card.files, ...newFiles],
+      history: [...card.history, ...historyItems],
     });
+    const mentionRegex = /@([A-Za-z0-9._-]+)/g;
+    const mentioned: string[] = [];
+    let m;
+    while ((m = mentionRegex.exec(newNote))) mentioned.push(m[1].toLowerCase());
+    if (mentioned.length > 0) {
+      teamMembers.forEach(tm => {
+        const local = (tm.email || '').split('@')[0].toLowerCase();
+        if (mentioned.includes(tm.name.toLowerCase()) || (local && mentioned.includes(local))) {
+          pushNotificationForUser(tm.id, { id: uid(), cardId: card.id, clientName: card.clientName || '', note: newNote, timestamp: new Date().toISOString(), pipelineId });
+        }
+      });
+    }
     setNewNote('');
+    setAttachments([]);
   };
 
   const handleStageChange = (stageId: string) => {
@@ -73,11 +217,29 @@ export function CardDetailPanel({
       history: [
         ...card.history,
         {
-          id: `hist-${Date.now()}`,
+          id: uid(),
           type: 'stage_change' as const,
           timestamp: new Date(),
           user: currentUser,
           details: { from: oldStage, to: newStage },
+        },
+      ],
+    });
+  };
+
+  const handleTierChange = (tier: string) => {
+    const oldTier = card.subscriptionTier;
+    const newTier = tier;
+    onUpdate(card.id, {
+      subscriptionTier: newTier,
+      history: [
+        ...card.history,
+        {
+          id: uid(),
+          type: 'tier_change',
+          timestamp: new Date(),
+          user: currentUser,
+          details: { from: oldTier, to: newTier },
         },
       ],
     });
@@ -90,7 +252,7 @@ export function CardDetailPanel({
       history: [
         ...card.history,
         {
-          id: `hist-${Date.now()}`,
+          id: uid(),
           type: 'assignment_change' as const,
           timestamp: new Date(),
           user: currentUser,
@@ -102,14 +264,14 @@ export function CardDetailPanel({
 
   return (
     <AnimatePresence>
-      <motion.div
+      <motion.div key="backdrop"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         className="fixed inset-0 bg-foreground/20 backdrop-blur-sm z-50"
         onClick={onClose}
       />
-      <motion.div
+      <motion.div key={`panel-${card.id}`}
         initial={{ opacity: 0, x: '100%' }}
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: '100%' }}
@@ -120,13 +282,7 @@ export function CardDetailPanel({
         {/* Header */}
         <div className={cn('px-6 py-4 border-b border-border flex items-start justify-between', stageColors.bgLight)}>
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <StageBadge stageId={card.stageId} stageName={currentStage?.name || ''} />
-              <span className="text-sm text-muted-foreground">
-                {formatRunningDays(runningDays)}
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-foreground">{card.clientName}</h2>
+            <h2 className="text-xl font-bold text-foreground">{card.clientName?.trim() || 'New Lead'}</h2>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose}>
             <X className="w-5 h-5" />
@@ -136,20 +292,153 @@ export function CardDetailPanel({
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           <div className="p-6 space-y-6">
-            {/* Quick Actions */}
-            <div className="flex items-center gap-3">
-              {!card.assignedTo || card.assignedTo.id !== currentUser.id ? (
-                <Button variant="default" size="sm" onClick={handleTakeCard}>
-                  <User className="w-4 h-4" />
-                  Take this card
-                </Button>
-              ) : (
-                <Badge variant="stage-live" className="py-1">
-                  <User className="w-3 h-3 mr-1" />
-                  Assigned to you
-                </Badge>
-              )}
+            
+
+            {/* Client Info */}
+            <div className="bg-muted/30 rounded-xl p-4 space-y-3">
+              <div className="flex items-start justify-between">
+                <div className="flex flex-col gap-2">
+                  <h3 className="font-semibold text-foreground flex items-center gap-2">
+                    <User className="w-4 h-4 text-muted-foreground" />
+                    Client Information
+                  </h3>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Calendar className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-foreground">Started {format(card.startDate, 'MMM d, yyyy')}</span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  {!card.assignedTo || card.assignedTo.id !== currentUser.id ? (
+                    <Button variant="default" size="sm" onClick={handleTakeCard}>
+                      <User className="w-4 h-4" />
+                      Take this card
+                    </Button>
+                  ) : (
+                    <Badge variant="stage-live" className="py-1">
+                      <User className="w-3 h-3 mr-1" />
+                      Assigned to you
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Client name</label>
+                    <Input value={card.clientName} onChange={e => onUpdate(card.id, { clientName: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Phone</label>
+                    <Input value={card.phone || ''} onChange={e => onUpdate(card.id, { phone: e.target.value || undefined })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Website</label>
+                    <Input value={card.liveUrl || ''} onChange={e => onUpdate(card.id, { liveUrl: e.target.value || undefined })} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">Subscription Tier</label>
+                    <Select value={card.subscriptionTier} onValueChange={handleTierChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder={card.subscriptionTier || 'Select tier'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getSubscriptionTiers().map(t => (
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Value</label>
+                    <Input
+                      type="text"
+                      value={dealInput}
+                      onFocus={() => { if (dealInput === '0') setDealInput(''); }}
+                      onBlur={() => { if (!dealInput) setDealInput('0'); }}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        const formatted = raw ? Number(raw).toLocaleString() : '';
+                        setDealInput(formatted);
+                        onUpdate(card.id, { dealValue: raw ? Number(raw) : undefined });
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Instagram</label>
+                    <Input value={card.instagram || ''} onChange={e => onUpdate(card.id, { instagram: e.target.value || undefined })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Instagram followers</label>
+                    <Input type="number" value={card.instagramFollowers ?? 0} onChange={e => onUpdate(card.id, { instagramFollowers: e.target.value ? Number(e.target.value) : undefined })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">TikTok</label>
+                    <Input value={card.tiktok || ''} onChange={e => onUpdate(card.id, { tiktok: e.target.value || undefined })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">TikTok followers</label>
+                    <Input type="number" value={card.tiktokFollowers ?? 0} onChange={e => onUpdate(card.id, { tiktokFollowers: e.target.value ? Number(e.target.value) : undefined })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Tokopedia</label>
+                    <Input value={card.tokopedia || ''} onChange={e => onUpdate(card.id, { tokopedia: e.target.value || undefined })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Tokopedia followers</label>
+                    <Input type="number" value={card.tokopediaFollowers ?? 0} onChange={e => onUpdate(card.id, { tokopediaFollowers: e.target.value ? Number(e.target.value) : undefined })} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Shopee</label>
+                    <Input value={card.shopee || ''} onChange={e => onUpdate(card.id, { shopee: e.target.value || undefined })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Shopee followers</label>
+                    <Input type="number" value={card.shopeeFollowers ?? 0} onChange={e => onUpdate(card.id, { shopeeFollowers: e.target.value ? Number(e.target.value) : undefined })} />
+                  </div>
+                </div>
+              </div>
             </div>
+            <Dialog open={!!previewFile} onOpenChange={(open) => { if (!open) setPreviewFile(null); }}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{previewFile?.name}</DialogTitle>
+                </DialogHeader>
+                {previewFile && (
+                  <div className="space-y-3">
+                    {previewFile.type === 'image' && (
+                      <img src={previewFile.url} alt={previewFile.name} className="max-h-[70vh] w-auto" />
+                    )}
+                    {previewFile.type === 'document' && (
+                      <iframe src={previewFile.url} className="w-full h-[70vh]" />
+                    )}
+                    {previewFile.type === 'other' && (
+                      <a href={previewFile.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                        Open in new tab
+                      </a>
+                    )}
+                    <div className="flex justify-end">
+                      <a href={previewFile.url} download className="inline-flex items-center rounded-md border px-3 py-2 text-sm">
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+
+            
 
             {/* Assignment & Stage */}
             <div className="grid grid-cols-2 gap-4">
@@ -157,21 +446,9 @@ export function CardDetailPanel({
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
                   Assigned to
                 </label>
-                <Select
-                  value={card.assignedTo?.id || 'unassigned'}
-                  onValueChange={handleAssigneeChange}
-                >
+                <Select value={card.assignedTo?.id || 'unassigned'} onValueChange={handleAssigneeChange}>
                   <SelectTrigger className="w-full">
-                    <SelectValue>
-                      {card.assignedTo ? (
-                        <div className="flex items-center gap-2">
-                          <MemberAvatar member={card.assignedTo} size="sm" />
-                          <span>{card.assignedTo.name}</span>
-                        </div>
-                      ) : (
-                        'Unassigned'
-                      )}
-                    </SelectValue>
+                    <SelectValue placeholder={card.assignedTo?.name || 'Unassigned'} />
                   </SelectTrigger>
                   <SelectContent>
                     {teamMembers.map((member) => (
@@ -196,102 +473,165 @@ export function CardDetailPanel({
                 </label>
                 <Select value={card.stageId} onValueChange={handleStageChange}>
                   <SelectTrigger className="w-full">
-                    <SelectValue>
-                      <StageBadge stageId={card.stageId} stageName={currentStage?.name || ''} />
-                    </SelectValue>
+                    <SelectValue placeholder={currentStage?.name || 'Select stage'} />
                   </SelectTrigger>
                   <SelectContent>
                     {stages.map((stage) => (
                       <SelectItem key={stage.id} value={stage.id}>
-                        <StageBadge stageId={stage.id} stageName={stage.name} />
+                        <StageBadge stageId={stage.id} stageName={stage.name} variant={stage.color as any} />
                       </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
+                  Section
+                </label>
+                <Select value={card.sectionId || 'none'} onValueChange={(v) => onUpdate(card.id, { sectionId: v === 'none' ? undefined : v })}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={card.sectionId ? (availableSections.find(s => s.id === card.sectionId)?.name || 'Section') : 'None'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {availableSections.map(sec => {
+                      const colors = getStageColorClasses('new', sec.color as any);
+                      return (
+                        <SelectItem key={sec.id} value={sec.id}>
+                          <div className={cn('flex items-center gap-2 rounded-md px-2 py-1', colors.bgLight, colors.text)}>
+                            <div className={cn('w-4 h-4 rounded-full', colors.bg)} />
+                            <span>{sec.name}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-foreground">Started {format(card.startDate, 'MMM d, yyyy')}</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
+                  Collaborators
+                </label>
+                <div className="space-y-2">
+                  {teamMembers.map(m => {
+                    const checked = (card.collaborators || []).some(c => c.id === m.id);
+                    return (
+                      <div key={m.id} className="flex items-center gap-2">
+                        <Checkbox checked={checked} onCheckedChange={(v) => {
+                          const isChecked = Boolean(v);
+                          const next = isChecked
+                            ? [...(card.collaborators || []), m]
+                            : (card.collaborators || []).filter(c => c.id !== m.id);
+                          const names = next.map(x => x.name).join(', ');
+                          onUpdate(card.id, {
+                            collaborators: next,
+                            history: [
+                              ...card.history,
+                              {
+                                id: uid(),
+                                type: 'assignment_change',
+                                timestamp: new Date(),
+                                user: currentUser,
+                                details: { to: names },
+                              },
+                            ],
+                          });
+                        }} />
+                        <MemberAvatar member={m} size="sm" />
+                        <span className="text-sm">{m.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-end mt-2">
+                  <Button size="sm" onClick={() => (onSave ? onSave(card) : onClose())}>Save</Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">Activity Phase</label>
+                <Select value={card.activityPhase || ''} onValueChange={handleActivityPhaseChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={card.activityPhase || 'Select activity phase'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {activityPhases.map(p => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {/* Client Info */}
-            <div className="bg-muted/30 rounded-xl p-4 space-y-3">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <User className="w-4 h-4 text-muted-foreground" />
-                Client Information
-              </h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                {card.instagram && (
-                  <div className="flex items-center gap-2">
-                    <Instagram className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{card.instagram}</span>
-                    {card.instagramFollowers && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {formatFollowers(card.instagramFollowers)}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-                {card.tiktok && (
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-muted-foreground" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
-                    </svg>
-                    <span className="text-foreground">{card.tiktok}</span>
-                    {card.tiktokFollowers && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {formatFollowers(card.tiktokFollowers)}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-                {card.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{card.phone}</span>
-                  </div>
-                )}
-                {card.liveUrl && (
-                  <div className="flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-muted-foreground" />
-                    <a
-                      href={card.liveUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline flex items-center gap-1"
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Tags</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {(card.tags || []).map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-[10px] flex items-center gap-1">
+                    {tag}
+                    <button
+                      className="ml-1 text-muted-foreground"
+                      onClick={() => {
+                        const next = (card.tags || []).filter(t => t !== tag);
+                        onUpdate(card.id, { tags: next });
+                      }}
                     >
-                      {card.liveUrl.replace('https://', '')}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                      ×
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              <div className="relative">
+                <Input
+                  placeholder="Add or search tags"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const name = tagInput.trim();
+                      if (!name) return;
+                      const exists = (card.tags || []).includes(name);
+                      const next = exists ? (card.tags || []) : [ ...(card.tags || []), name ];
+                      onUpdate(card.id, { tags: next });
+                      const global = getTags();
+                      if (!global.includes(name)) setTags([ ...global, name ]);
+                      setTagInput('');
+                    }
+                  }}
+                />
+                {tagInput && tagSuggestions.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full rounded-md border bg-card">
+                    {tagSuggestions.map(s => (
+                      <button
+                        key={s}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50"
+                        onClick={() => {
+                          const next = [ ...(card.tags || []), s ];
+                          onUpdate(card.id, { tags: next });
+                          setTagInput('');
+                        }}
+                      >
+                        {s}
+                      </button>
+                    ))}
                   </div>
                 )}
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-foreground">
-                    Started {format(card.startDate, 'MMM d, yyyy')}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="tier">{card.subscriptionTier}</Badge>
-                </div>
               </div>
             </div>
 
-            {/* Add Note */}
-            <div>
-              <h3 className="font-semibold text-foreground flex items-center gap-2 mb-3">
-                <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                Add a note
-              </h3>
-              <div className="space-y-2">
-                <Textarea
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  placeholder="Write a note about this lead..."
-                  className="min-h-[80px] resize-none"
-                />
-                <Button size="sm" onClick={handleAddNote} disabled={!newNote.trim()}>
-                  Add note
-                </Button>
-              </div>
-            </div>
 
             {/* Files */}
             {card.files.length > 0 && (
@@ -310,9 +650,12 @@ export function CardDetailPanel({
                         <FileText className="w-5 h-5 text-muted-foreground" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">
+                        <button
+                          className="text-sm font-medium text-primary hover:underline truncate"
+                          onClick={() => setPreviewFile(file)}
+                        >
                           {file.name}
-                        </p>
+                        </button>
                         <p className="text-xs text-muted-foreground">
                           {formatFileSize(file.size)} • {format(file.uploadedAt, 'MMM d')}
                         </p>
@@ -323,13 +666,7 @@ export function CardDetailPanel({
               </div>
             )}
 
-            {/* Upload Area */}
-            <div className="border-2 border-dashed border-border rounded-xl p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
-              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">
-                Drop files here or click to upload
-              </p>
-            </div>
+            
 
             {/* History/Timeline */}
             <div>
@@ -337,9 +674,103 @@ export function CardDetailPanel({
                 <Clock className="w-4 h-4 text-muted-foreground" />
                 Activity
               </h3>
+              <div className="mb-4">
+                <h3 className="font-semibold text-foreground flex items-center gap-2 mb-3">
+                  <MessageSquare className="w-4 h-4 text-muted-foreground" />
+                  Add a note
+                </h3>
+                <div className="space-y-2">
+                  <div className="relative">
+                    <div className="absolute inset-0 pointer-events-none px-3 py-2 text-sm whitespace-pre-wrap">
+                      {renderNoteWithMentions(newNote)}
+                    </div>
+                    <Textarea
+                      ref={noteRef}
+                      value={newNote}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewNote(val);
+                        const cursor = e.target.selectionStart ?? val.length;
+                        let start = cursor - 1;
+                        while (start >= 0 && !/\s/.test(val[start])) start--;
+                        const token = val.slice(start + 1, cursor);
+                        if (token.startsWith('@')) {
+                          const q = token.slice(1).toLowerCase();
+                          const source = teamMembers;
+                          const opts = q
+                            ? source.filter(m => (m.name.toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q)))
+                            : source;
+                          setMentionOptions(opts.slice(0, 6));
+                          setMentionQuery(q);
+                          setMentionOpen(opts.length > 0);
+                        } else {
+                          setMentionOpen(false);
+                          setMentionQuery('');
+                        }
+                      }}
+                      placeholder="Write a note about this lead..."
+                      className="min-h-[80px] resize-none bg-transparent text-transparent"
+                      style={{ caretColor: 'hsl(var(--foreground))' }}
+                    />
+                    {mentionOpen && mentionOptions.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-card">
+                        {mentionOptions.map(m => (
+                          <button
+                            key={m.id}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex items-center gap-2"
+                            onClick={() => {
+                              const val = newNote;
+                              const cursor = (noteRef.current?.selectionStart ?? val.length);
+                              let start = cursor - 1;
+                              while (start >= 0 && !/\s/.test(val[start])) start--;
+                              const before = val.slice(0, start + 1);
+                              const after = val.slice(cursor);
+                              const insert = `@${m.name} `;
+                              const next = `${before}${insert}${after}`;
+                              setNewNote(next);
+                              setMentionOpen(false);
+                              setMentionQuery('');
+                            }}
+                          >
+                            <MemberAvatar member={m} size="sm" />
+                            <span>{m.name}</span>
+                            {m.email && <span className="text-xs text-muted-foreground">{m.email}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => {
+                      const files = e.target.files ? Array.from(e.target.files) : [];
+                      setAttachments(files);
+                    }} />
+                    <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Attach files
+                    </Button>
+                    <Button size="sm" onClick={handleAddNote} disabled={!newNote.trim() && attachments.length === 0}>
+                      Add note
+                    </Button>
+                  </div>
+                  {attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {attachments.map((f) => (
+                        <Badge key={f.name} variant="secondary" className="text-[10px]">
+                          {f.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
               <div className="space-y-4">
                 {[...card.history].reverse().map((event, index) => (
-                  <div key={event.id} className="flex gap-3">
+                  <div
+                    key={event.id}
+                    ref={(el) => { itemRefs.current[event.id] = el; }}
+                    className={cn("flex gap-3", focusEventId === event.id ? "ring-2 ring-primary rounded-md" : "")}
+                  >
                     <div className="relative">
                       <MemberAvatar member={event.user} size="sm" />
                       {index < card.history.length - 1 && (
@@ -366,12 +797,31 @@ export function CardDetailPanel({
                         )}
                         {event.type === 'note_added' && (
                           <p className="bg-muted/50 rounded-lg p-2 mt-1 text-foreground">
-                            {event.details.note}
+                            {renderNoteWithMentions(event.details.note)}
                           </p>
                         )}
                         {event.type === 'assignment_change' && (
                           <span>
                             Assigned to <strong>{event.details.to}</strong>
+                          </span>
+                        )}
+                        {event.type === 'file_added' && (
+                          <span>
+                            Added file <strong>{event.details.fileName}</strong>
+                          </span>
+                        )}
+                        {event.type === 'tier_change' && (
+                          <span className="flex items-center gap-1">
+                            Subscription tier <strong>{event.details.from}</strong>
+                            <ArrowRight className="w-3 h-3" />
+                            <strong>{event.details.to}</strong>
+                          </span>
+                        )}
+                        {event.type === 'activity_phase_change' && (
+                          <span className="flex items-center gap-1">
+                            Activity phase <strong>{event.details.from || 'None'}</strong>
+                            <ArrowRight className="w-3 h-3" />
+                            <strong>{event.details.to}</strong>
                           </span>
                         )}
                       </div>

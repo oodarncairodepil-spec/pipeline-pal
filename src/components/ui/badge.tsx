@@ -25,6 +25,16 @@ const badgeVariants = cva(
           "border-transparent bg-stage-live-bg text-stage-live",
         "stage-lost":
           "border-transparent bg-stage-lost-bg text-stage-lost",
+        "stage-purple":
+          "border-transparent bg-stage-purple-bg text-stage-purple",
+        "stage-teal":
+          "border-transparent bg-stage-teal-bg text-stage-teal",
+        "stage-indigo":
+          "border-transparent bg-stage-indigo-bg text-stage-indigo",
+        "stage-pink":
+          "border-transparent bg-stage-pink-bg text-stage-pink",
+        "stage-orange":
+          "border-transparent bg-stage-orange-bg text-stage-orange",
         tier:
           "border-border bg-card text-card-foreground",
       },

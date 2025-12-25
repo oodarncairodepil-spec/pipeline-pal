@@ -45,6 +45,11 @@
     --stage-onboard: 217 90% 55%;
     --stage-live: 142 70% 45%;
     --stage-lost: 0 72% 55%;
+    --stage-purple: 270 70% 60%;
+    --stage-teal: 180 70% 45%;
+    --stage-indigo: 225 70% 55%;
+    --stage-pink: 330 75% 60%;
+    --stage-orange: 25 90% 55%;
 
     /* Stage backgrounds (lighter versions) */
     --stage-new-bg: 220 15% 96%;
@@ -52,6 +57,11 @@
     --stage-onboard-bg: 217 90% 96%;
     --stage-live-bg: 142 70% 95%;
     --stage-lost-bg: 0 72% 96%;
+    --stage-purple-bg: 270 70% 96%;
+    --stage-teal-bg: 180 70% 95%;
+    --stage-indigo-bg: 225 70% 96%;
+    --stage-pink-bg: 330 75% 96%;
+    --stage-orange-bg: 25 90% 95%;
 
     /* Shadows */
     --shadow-sm: 0 1px 2px 0 hsl(220 20% 15% / 0.04);
@@ -106,12 +116,22 @@
     --stage-onboard: 217 85% 55%;
     --stage-live: 142 65% 45%;
     --stage-lost: 0 70% 50%;
+    --stage-purple: 270 65% 55%;
+    --stage-teal: 180 65% 45%;
+    --stage-indigo: 225 65% 55%;
+    --stage-pink: 330 70% 55%;
+    --stage-orange: 25 85% 50%;
 
     --stage-new-bg: 220 20% 18%;
     --stage-called-bg: 38 50% 15%;
     --stage-onboard-bg: 217 50% 15%;
     --stage-live-bg: 142 40% 12%;
     --stage-lost-bg: 0 40% 15%;
+    --stage-purple-bg: 270 35% 18%;
+    --stage-teal-bg: 180 35% 16%;
+    --stage-indigo-bg: 225 35% 18%;
+    --stage-pink-bg: 330 35% 18%;
+    --stage-orange-bg: 25 35% 16%;
 
     --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.2);
     --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3), 0 2px 4px -1px hsl(0 0% 0% / 0.2);

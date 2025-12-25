@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { TeamMember } from '@/types/pipeline';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface AvatarStackProps {
   member?: TeamMember;
@@ -31,14 +32,23 @@ export function MemberAvatar({ member, size = 'md', showName = false, className 
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <img
-        src={member.avatar}
-        alt={member.name}
-        className={cn(
-          'rounded-full ring-2 ring-background shadow-sm object-cover',
-          sizeClasses[size]
-        )}
-      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <img
+            src={member.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(member.name || 'User')}&backgroundColor=b6e3f4`}
+            alt={member.name}
+            className={cn(
+              'rounded-full ring-2 ring-background shadow-sm object-cover',
+              sizeClasses[size]
+            )}
+            onError={(e) => {
+              const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(member.name || 'User')}&backgroundColor=b6e3f4`;
+              if ((e.currentTarget as HTMLImageElement).src !== fallback) (e.currentTarget as HTMLImageElement).src = fallback;
+            }}
+          />
+        </TooltipTrigger>
+        <TooltipContent>{member.name}</TooltipContent>
+      </Tooltip>
       {showName && (
         <span className="text-sm font-medium text-foreground">{member.name}</span>
       )}
@@ -71,16 +81,24 @@ export function AvatarGroup({ members, max = 3, size = 'sm' }: AvatarGroupProps)
   return (
     <div className="flex items-center">
       {displayMembers.map((member, index) => (
-        <img
-          key={member.id}
-          src={member.avatar}
-          alt={member.name}
-          className={cn(
-            'rounded-full ring-2 ring-background shadow-sm object-cover',
-            sizeClasses[size],
-            index > 0 && offsetClasses[size]
-          )}
-        />
+        <Tooltip key={member.id}>
+          <TooltipTrigger asChild>
+            <img
+              src={member.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(member.name || 'User')}&backgroundColor=b6e3f4`}
+              alt={member.name}
+              className={cn(
+                'rounded-full ring-2 ring-background shadow-sm object-cover',
+                sizeClasses[size],
+                index > 0 && offsetClasses[size]
+              )}
+              onError={(e) => {
+                const fallback = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(member.name || 'User')}&backgroundColor=b6e3f4`;
+                if ((e.currentTarget as HTMLImageElement).src !== fallback) (e.currentTarget as HTMLImageElement).src = fallback;
+              }}
+            />
+          </TooltipTrigger>
+          <TooltipContent>{member.name}</TooltipContent>
+        </Tooltip>
       ))}
       {remaining > 0 && (
         <div

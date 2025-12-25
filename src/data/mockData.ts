@@ -1,4 +1,5 @@
 import { BoardState, Stage, TeamMember, LeadCard, Lane, StageId } from '@/types/pipeline';
+import { getPipelineMembers, getPipelineStages } from '@/lib/settings';
 
 export const stages: Stage[] = [
   { id: 'new', name: 'New', color: 'stage-new', order: 0 },
@@ -14,18 +15,21 @@ export const teamMembers: TeamMember[] = [
     name: 'Alex',
     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4',
     role: 'manager',
+    email: 'alex@example.com',
   },
   {
     id: 'jamie',
     name: 'Jamie',
     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jamie&backgroundColor=c0aede',
     role: 'staff',
+    email: 'jamie@example.com',
   },
   {
     id: 'taylor',
     name: 'Taylor',
     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Taylor&backgroundColor=ffd5dc',
     role: 'staff',
+    email: 'taylor@example.com',
   },
 ];
 
@@ -37,6 +41,7 @@ export const mockCards: Record<string, LeadCard> = {
     tiktok: '@bakeryaja.id',
     phone: '+62 812-3456-7890',
     subscriptionTier: 'Pro',
+    dealValue: 15000000,
     liveUrl: 'https://bakeryaja.id',
     instagramFollowers: 12500,
     tiktokFollowers: 8200,
@@ -108,6 +113,7 @@ export const mockCards: Record<string, LeadCard> = {
     tiktok: '@kopikita.id',
     phone: '+62 812-9876-5432',
     subscriptionTier: 'Basic',
+    dealValue: 10000000,
     liveUrl: 'https://kopikita.id',
     instagramFollowers: 5300,
     tiktokFollowers: 3100,
@@ -163,6 +169,7 @@ export const mockCards: Record<string, LeadCard> = {
     tiktok: '@nasisedap.id',
     phone: '+62 813-5555-1234',
     subscriptionTier: 'Enterprise',
+    dealValue: 50000000,
     liveUrl: 'https://warungnasisedap.com',
     instagramFollowers: 45000,
     tiktokFollowers: 32000,
@@ -199,8 +206,16 @@ export const mockCards: Record<string, LeadCard> = {
     id: 'card-4',
     clientName: 'Toko Baju Modern',
     instagram: '@tokobajumodern',
+    tiktok: '@tokobaju',
+    tokopedia: '@tokobaju.stores',
+    shopee: '@tokobaju.shop',
     phone: '+62 811-2222-3333',
     subscriptionTier: 'Basic',
+    dealValue: 7000000,
+    instagramFollowers: 24800,
+    tiktokFollowers: 99900,
+    tokopediaFollowers: 178000,
+    shopeeFollowers: 25300,
     startDate: new Date('2025-12-20'),
     stageId: 'new',
     notes: [],
@@ -222,6 +237,7 @@ export const mockCards: Record<string, LeadCard> = {
     tiktok: '@saloncantik',
     phone: '+62 812-7777-8888',
     subscriptionTier: 'Pro',
+    dealValue: 12000000,
     instagramFollowers: 8900,
     tiktokFollowers: 5600,
     startDate: new Date('2025-12-05'),
@@ -259,6 +275,7 @@ export const mockCards: Record<string, LeadCard> = {
     instagram: '@gymsehat',
     phone: '+62 815-9999-0000',
     subscriptionTier: 'Pro',
+    dealValue: 0,
     instagramFollowers: 15200,
     startDate: new Date('2025-11-20'),
     stageId: 'lost',
@@ -298,9 +315,49 @@ export const lanes: Lane[] = [
   { id: 'lost', stage: stages[4], cardIds: ['card-6'] },
 ];
 
-export const initialBoardState: BoardState = {
-  lanes,
-  cards: mockCards,
-  stages,
-  teamMembers,
+export const loadInitialBoardState = (pipelineId: string = 'default'): BoardState => {
+  const stageOverrides = getPipelineStages(pipelineId);
+  let finalStages: Stage[] = [...stages];
+  if (Array.isArray(stageOverrides) && stageOverrides.length > 0) {
+    const map = new Map<string, Stage>();
+    finalStages.forEach(s => map.set(s.id, s));
+    let addCount = 0;
+    const maxOrder = finalStages.reduce((m, s) => Math.max(m, s.order || 0), 0);
+    stageOverrides.forEach((o: any) => {
+      if (o && o.id && o.name) {
+        const existing = map.get(o.id as StageId);
+        if (existing) {
+          map.set(o.id, { ...existing, name: o.name, color: o.color || existing.color });
+        } else {
+          const newStage: Stage = {
+            id: o.id as StageId,
+            name: o.name as string,
+            color: (o.color as string) || 'stage-new',
+            order: typeof o.order === 'number' ? o.order : maxOrder + (++addCount),
+          };
+          map.set(newStage.id, newStage);
+        }
+      }
+    });
+    finalStages = Array.from(map.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+
+  const teamOverrides = getPipelineMembers(pipelineId);
+  const finalTeam: TeamMember[] = Array.isArray(teamOverrides) && teamOverrides.length > 0
+    ? teamOverrides as any
+    : teamMembers;
+
+  const computedLanes: Lane[] = finalStages.map(s => ({
+    id: s.id,
+    stage: s,
+    cardIds: Object.values(mockCards).filter(c => c.stageId === s.id).map(c => c.id),
+    sections: [],
+  }));
+
+  return {
+    lanes: computedLanes,
+    cards: mockCards,
+    stages: finalStages,
+    teamMembers: finalTeam,
+  };
 };

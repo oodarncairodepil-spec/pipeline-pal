@@ -5,9 +5,10 @@ interface StageBadgeProps {
   stageId: StageId;
   stageName: string;
   size?: 'sm' | 'md';
+  variant?: 'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost';
 }
 
-export function StageBadge({ stageId, stageName, size = 'md' }: StageBadgeProps) {
+export function StageBadge({ stageId, stageName, size = 'md', variant }: StageBadgeProps) {
   const variantMap: Record<StageId, 'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost'> = {
     new: 'stage-new',
     called: 'stage-called',
@@ -18,7 +19,7 @@ export function StageBadge({ stageId, stageName, size = 'md' }: StageBadgeProps)
 
   return (
     <Badge
-      variant={variantMap[stageId]}
+      variant={variant ?? variantMap[stageId]}
       className={size === 'sm' ? 'px-2 py-0 text-[10px]' : ''}
     >
       {stageName}
