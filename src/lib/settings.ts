@@ -142,7 +142,7 @@ export const setActivityPhases = (phases: string[]) => {
 
 // Pipelines registry
 export interface PipelineRef { id: string; name: string }
-export interface UserNotification { id: string; cardId: string; clientName: string; note: string; timestamp: string; pipelineId: string }
+export interface UserNotification { id: string; cardId: string; clientName: string; note: string; timestamp: string; pipelineId: string; read?: boolean }
 
 export const getPipelines = (): PipelineRef[] => {
   try {
@@ -250,19 +250,37 @@ export const getNotificationsForUser = (userId: string): UserNotification[] => {
   try {
     const raw = localStorage.getItem(`notifications:${userId}`);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed)) {
+      // Ensure all notifications have a read property (default to false if missing)
+      const normalized = parsed.map(n => ({ ...n, read: n.read !== undefined ? n.read : false }));
+      return normalized;
+    }
   } catch {}
   const seed: UserNotification[] = [
-    { id: `n-${Date.now()}`, cardId: 'card-1', clientName: 'Bakery Aja', note: '@Alex please review', timestamp: new Date().toISOString(), pipelineId: 'default' },
+    { id: `n-${Date.now()}`, cardId: 'card-1', clientName: 'Bakery Aja', note: '@Alex please review', timestamp: new Date().toISOString(), pipelineId: 'default', read: false },
   ];
   try { localStorage.setItem(`notifications:${userId}`, JSON.stringify(seed)); } catch {}
   return seed;
 };
 
+export const getUnreadNotificationCount = (userId: string): number => {
+  const notifications = getNotificationsForUser(userId);
+  return notifications.filter(n => !n.read).length;
+};
+
+export const markNotificationsAsRead = (userId: string) => {
+  try {
+    const notifications = getNotificationsForUser(userId);
+    const updated = notifications.map(n => ({ ...n, read: true }));
+    localStorage.setItem(`notifications:${userId}`, JSON.stringify(updated));
+  } catch {}
+};
+
 export const pushNotificationForUser = (userId: string, notification: UserNotification) => {
   try {
     const list = getNotificationsForUser(userId);
-    const next = [notification, ...list].slice(0, 200);
+    const notificationWithRead = { ...notification, read: false };
+    const next = [notificationWithRead, ...list].slice(0, 200);
     localStorage.setItem(`notifications:${userId}`, JSON.stringify(next));
   } catch {}
 };

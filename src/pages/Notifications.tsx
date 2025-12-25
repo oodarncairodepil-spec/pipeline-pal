@@ -1,6 +1,6 @@
 import { Helmet } from 'react-helmet-async';
-import { getCurrentUser, getNotificationsForUser } from '@/lib/settings';
-import { useMemo } from 'react';
+import { getCurrentUser, getNotificationsForUser, markNotificationsAsRead } from '@/lib/settings';
+import { useMemo, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '@/components/AppHeader';
@@ -9,6 +9,11 @@ export default function Notifications() {
   const navigate = useNavigate();
   const user = getCurrentUser();
   const items = useMemo(() => getNotificationsForUser(user.id), [user.id]);
+  
+  useEffect(() => {
+    // Mark all notifications as read when the page is viewed
+    markNotificationsAsRead(user.id);
+  }, [user.id]);
   return (
     <>
       <Helmet><title>Notifications</title></Helmet>

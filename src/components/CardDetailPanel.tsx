@@ -14,6 +14,9 @@ import { StageBadge } from './StageBadge';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Check, ChevronsUpDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getTags, setTags, getPipelineActivityPhases, pushNotificationForUser } from '@/lib/settings';
 import { useParams, useLocation } from 'react-router-dom';
@@ -31,6 +34,7 @@ interface CardDetailPanelProps {
   onSave?: (card: LeadCard) => void;
   isDraft?: boolean;
   sectionsByStage?: Record<string, { id: string; name: string; color: string }[]>;
+  existingClientNames?: string[];
 }
 
 export function CardDetailPanel({
@@ -43,6 +47,7 @@ export function CardDetailPanel({
   onSave,
   isDraft = false,
   sectionsByStage,
+  existingClientNames = [],
 }: CardDetailPanelProps) {
   const { pipelineId = 'default' } = useParams();
   const [newNote, setNewNote] = useState('');
@@ -50,6 +55,8 @@ export function CardDetailPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewFile, setPreviewFile] = useState<FileAttachment | null>(null);
   const [tagInput, setTagInput] = useState('');
+  const [clientNameOpen, setClientNameOpen] = useState(false);
+  const [clientNameSearch, setClientNameSearch] = useState('');
   const allTags = getTags();
   const tagSuggestions = allTags.filter(t => t.toLowerCase().includes(tagInput.toLowerCase())).filter(t => !(card.tags || []).includes(t)).slice(0, 5);
   const activityPhases = getPipelineActivityPhases(pipelineId);
@@ -325,7 +332,90 @@ export function CardDetailPanel({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground">Client name</label>
-                    <Input value={card.clientName} onChange={e => onUpdate(card.id, { clientName: e.target.value })} />
+                    <Popover open={clientNameOpen} onOpenChange={setClientNameOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                            !card.clientName && "text-muted-foreground"
+                          )}
+                        >
+                          {card.clientName || "Select or create client..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[244px] p-0" align="start">
+                        <Command>
+                          <CommandInput 
+                            placeholder="Search or create client..." 
+                            value={clientNameSearch}
+                            onValueChange={setClientNameSearch}
+                          />
+                          <CommandList>
+                            <CommandEmpty>
+                              <div className="py-2">
+                                <button
+                                  type="button"
+                                  className="w-full text-left px-2 py-1.5 text-sm hover:bg-accent rounded-sm"
+                                  onClick={() => {
+                                    if (clientNameSearch.trim()) {
+                                      onUpdate(card.id, { clientName: clientNameSearch.trim() });
+                                      setClientNameOpen(false);
+                                      setClientNameSearch('');
+                                    }
+                                  }}
+                                >
+                                  Create "{clientNameSearch}"
+                                </button>
+                              </div>
+                            </CommandEmpty>
+                            <CommandGroup>
+                              {existingClientNames
+                                .filter(name => 
+                                  name.toLowerCase().includes(clientNameSearch.toLowerCase()) &&
+                                  name !== card.clientName
+                                )
+                                .map((name) => (
+                                  <CommandItem
+                                    key={name}
+                                    value={name}
+                                    onSelect={() => {
+                                      onUpdate(card.id, { clientName: name });
+                                      setClientNameOpen(false);
+                                      setClientNameSearch('');
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        card.clientName === name ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    {name}
+                                  </CommandItem>
+                                ))}
+                              {clientNameSearch.trim() && 
+                               !existingClientNames.some(name => 
+                                 name.toLowerCase() === clientNameSearch.toLowerCase()
+                               ) && (
+                                <CommandItem
+                                  value={clientNameSearch}
+                                  onSelect={() => {
+                                    onUpdate(card.id, { clientName: clientNameSearch.trim() });
+                                    setClientNameOpen(false);
+                                    setClientNameSearch('');
+                                  }}
+                                >
+                                  <Check className="mr-2 h-4 w-4 opacity-0" />
+                                  Create "{clientNameSearch}"
+                                </CommandItem>
+                              )}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Phone</label>

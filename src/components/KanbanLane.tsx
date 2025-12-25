@@ -132,25 +132,6 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
         </DialogContent>
       </Dialog>
 
-      {Array.isArray(lane.sections) && lane.sections.length > 0 && (
-        <div className="px-4 py-2 border-b border-border/50 bg-muted/20">
-          <div className="text-xs font-medium text-muted-foreground mb-1">Sections</div>
-          <div className="flex flex-wrap gap-2">
-            {lane.sections.map((sec) => {
-              const colors = getStageColorClasses('new', sec.color as any);
-              const count = cards.filter(c => c.sectionId === sec.id).length;
-              return (
-                <div key={sec.id} className={cn('flex items-center gap-2 rounded-md px-2 py-1', colors.bgLight, colors.text)}>
-                  <div className={cn('w-3 h-3 rounded-full', colors.bg)} />
-                  <span className="text-xs">{sec.name}</span>
-                  <span className="text-[10px] text-muted-foreground">({count})</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Cards Container */}
       {(!lane.sections || lane.sections.length === 0) ? (
         <Droppable droppableId={lane.id}>
@@ -190,6 +171,63 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
         </Droppable>
       ) : (
         <div className="p-3 rounded-b-xl space-y-4 bg-muted/30">
+          {/* Section containers */}
+          {lane.sections?.map((sec) => {
+            const colors = getStageColorClasses('new', sec.color as any);
+            const sectionCards = cards.filter(c => c.sectionId === sec.id);
+            return (
+              <div key={sec.id} className="relative">
+                {/* Header as separate droppable */}
+                <Droppable droppableId={`section-header:${lane.id}:${sec.id}`}>
+                  {(headerProvided, headerSnapshot) => (
+                    <div
+                      ref={headerProvided.innerRef}
+                      {...headerProvided.droppableProps}
+                      className={cn(
+                        'rounded-t-lg border-t border-l border-r bg-card/60 px-3 py-2 flex items-center gap-2 cursor-pointer transition-all',
+                        colors.bgLight,
+                        colors.text,
+                        headerSnapshot.isDraggingOver && 'ring-2 ring-primary/50 scale-[1.02] shadow-lg'
+                      )}
+                    >
+                      <div className={cn('w-3 h-3 rounded-full', colors.bg)} />
+                      <span className="text-xs font-medium">{sec.name}</span>
+                      <span className="text-[10px] text-muted-foreground">({sectionCards.length})</span>
+                      {headerProvided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+                {/* Content area as separate droppable */}
+                <Droppable droppableId={`section:${lane.id}:${sec.id}`}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className={cn(
+                        'rounded-b-lg border-b border-l border-r bg-card/60 p-2 space-y-3 min-h-[60px]',
+                        colors.text,
+                        snapshot.isDraggingOver && 'ring-2 ring-primary/20'
+                      )}
+                    >
+                      {sectionCards.map((card, index) => (
+                        <KanbanCard
+                          key={card.id}
+                          card={card}
+                          stage={lane.stage}
+                          index={index}
+                          onClick={() => onCardClick(card)}
+                          currentUser={currentUser}
+                          onToggleWatch={() => onToggleWatch(card.id, currentUser.id)}
+                        />
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+            );
+          })}
+
           {/* Unsectioned container */}
           <div className="rounded-lg border border-border/50 bg-card/60">
             <div className="px-3 py-2 text-xs text-muted-foreground">No Section</div>
@@ -216,43 +254,6 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
               )}
             </Droppable>
           </div>
-
-          {/* Section containers */}
-          {lane.sections?.map((sec) => {
-            const colors = getStageColorClasses('new', sec.color as any);
-            const sectionCards = cards.filter(c => c.sectionId === sec.id);
-            return (
-              <Droppable droppableId={`section:${lane.id}:${sec.id}`} key={sec.id}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={cn('rounded-lg border bg-card/60', colors.text, snapshot.isDraggingOver && 'ring-2 ring-primary/20')}
-                  >
-                    <div className={cn('px-3 py-2 flex items-center gap-2', colors.bgLight)}>
-                      <div className={cn('w-3 h-3 rounded-full', colors.bg)} />
-                      <span className="text-xs font-medium">{sec.name}</span>
-                      <span className="text-[10px] text-muted-foreground">({sectionCards.length})</span>
-                    </div>
-                    <div className={cn('p-2 space-y-3 rounded-b-lg')}>
-                      {sectionCards.map((card, index) => (
-                        <KanbanCard
-                          key={card.id}
-                          card={card}
-                          stage={lane.stage}
-                          index={index}
-                          onClick={() => onCardClick(card)}
-                          currentUser={currentUser}
-                          onToggleWatch={() => onToggleWatch(card.id, currentUser.id)}
-                        />
-                      ))}
-                      {provided.placeholder}
-                    </div>
-                  </div>
-                )}
-              </Droppable>
-            );
-          })}
 
           <Button
             variant="ghost"

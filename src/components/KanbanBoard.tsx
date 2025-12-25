@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import { motion } from 'framer-motion';
-import { Search, Filter, Columns } from 'lucide-react';
+import { Search, Filter } from 'lucide-react';
 import { BoardState, LeadCard, StageId } from '@/types/pipeline';
 import { loadInitialBoardState } from '@/data/mockData';
 import { setPipelineStages, getPipelines, setPipelines, pushNotificationForUser } from '@/lib/settings';
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MemberAvatar } from './MemberAvatar';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { getNotificationsForUser } from '@/lib/settings';
+import { getNotificationsForUser, getUnreadNotificationCount } from '@/lib/settings';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -34,6 +34,7 @@ export function KanbanBoard() {
   const navigate = useNavigate();
   const pipelines = getPipelines();
   const pipelineTitle = `${(pipelines.find(p => p.id === pipelineId)?.name || 'Sales')} Pipeline`;
+  const unreadCount = getUnreadNotificationCount(currentUser.id);
   const slugify = (name: string) => name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `stage-${Math.random().toString(36).slice(2, 6)}`;
   const makeUniqueStageId = (base: string) => {
     let id = base;
@@ -50,15 +51,16 @@ export function KanbanBoard() {
 
     if (!destination) return;
     const destinationId = destination.droppableId;
-    const isSectionDrop = destinationId.startsWith('section:');
+    const isSectionDrop = destinationId.startsWith('section:') || destinationId.startsWith('section-header:');
 
     let newLanes = [...boardState.lanes];
     const card = boardState.cards[draggableId];
 
     // Branch: dropping onto the general lane area (unsectioned)
     if (!isSectionDrop) {
-      const srcIsSection = source.droppableId.startsWith('section:');
-      const srcLaneId = srcIsSection ? source.droppableId.split(':')[1] : source.droppableId;
+      const srcIsSection = source.droppableId.startsWith('section:') || source.droppableId.startsWith('section-header:');
+      const normalizedSrcId = srcIsSection && source.droppableId.startsWith('section-header:') ? source.droppableId.replace('section-header:', 'section:') : source.droppableId;
+      const srcLaneId = srcIsSection ? normalizedSrcId.split(':')[1] : source.droppableId;
       const sourceIndex = newLanes.findIndex(l => l.id === srcLaneId);
       const destIndex = newLanes.findIndex(l => l.id === destinationId);
       if (sourceIndex === -1 || destIndex === -1) return;
@@ -71,7 +73,8 @@ export function KanbanBoard() {
 
       // If dragged from a section, remove from that section
       if (srcIsSection) {
-        const [, , srcSectionId] = source.droppableId.split(':');
+        const normalizedSrcId = source.droppableId.startsWith('section-header:') ? source.droppableId.replace('section-header:', 'section:') : source.droppableId;
+        const [, , srcSectionId] = normalizedSrcId.split(':');
         newLanes = newLanes.map(lane => {
           if (lane.id !== srcLaneId) return lane;
           const sections = (lane.sections || []).map(sec => sec.id === srcSectionId ? { ...sec, cardIds: sec.cardIds.filter(id => id !== draggableId) } : sec);
@@ -105,9 +108,13 @@ export function KanbanBoard() {
       return;
     }
 
-    const [, laneId, sectionId] = destinationId.split(':');
-    const srcIsSection = source.droppableId.startsWith('section:');
-    const srcLaneId = srcIsSection ? source.droppableId.split(':')[1] : source.droppableId;
+    // Handle both section: and section-header: formats
+    const isSectionHeader = destinationId.startsWith('section-header:');
+    const normalizedDestId = isSectionHeader ? destinationId.replace('section-header:', 'section:') : destinationId;
+    const [, laneId, sectionId] = normalizedDestId.split(':');
+    const srcIsSection = source.droppableId.startsWith('section:') || source.droppableId.startsWith('section-header:');
+    const normalizedSrcId = srcIsSection && source.droppableId.startsWith('section-header:') ? source.droppableId.replace('section-header:', 'section:') : source.droppableId;
+    const srcLaneId = srcIsSection ? normalizedSrcId.split(':')[1] : source.droppableId;
     const fromLaneIndex = newLanes.findIndex(l => l.id === srcLaneId);
     const toLaneIndex = newLanes.findIndex(l => l.id === laneId);
     if (fromLaneIndex === -1 || toLaneIndex === -1) return;
@@ -129,7 +136,8 @@ export function KanbanBoard() {
 
     // If source was a section in same lane, ensure removal from the source section
     if (srcIsSection && srcLaneId === laneId) {
-      const [, , srcSectionId] = source.droppableId.split(':');
+      const normalizedSrcId = source.droppableId.startsWith('section-header:') ? source.droppableId.replace('section-header:', 'section:') : source.droppableId;
+      const [, , srcSectionId] = normalizedSrcId.split(':');
       newLanes = newLanes.map(lane => {
         if (lane.id !== laneId) return lane;
         const sections = (lane.sections || []).map(sec => sec.id === srcSectionId && srcSectionId !== sectionId ? { ...sec, cardIds: sec.cardIds.filter(id => id !== draggableId) } : sec);
@@ -328,12 +336,6 @@ export function KanbanBoard() {
             <p className="text-sm text-muted-foreground">
               Manage your leads and track progress
             </p>
-            <div className="mt-2">
-              <Button variant="default" onClick={() => setAddColumnOpen(true)}>
-                <Columns className="w-4 h-4 mr-2" />
-                Add New Column
-              </Button>
-            </div>
           </div>
           <div className="flex items-center gap-4">
             {/* Search */}
@@ -370,8 +372,13 @@ export function KanbanBoard() {
             <div className="flex items-center">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="rounded-full">
+                  <button className="rounded-full relative">
                     <MemberAvatar member={currentUser} size="md" />
+                    {unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-semibold text-white bg-red-500 rounded-full border-2 border-background">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -417,6 +424,7 @@ export function KanbanBoard() {
           teamMembers={boardState.teamMembers}
           currentUser={currentUser}
           sectionsByStage={Object.fromEntries(boardState.lanes.map(l => [l.id, (l.sections || []).map(s => ({ id: s.id, name: s.name, color: s.color }))]))}
+          existingClientNames={Array.from(new Set(Object.values(boardState.cards).map(c => c.clientName).filter(Boolean)))}
           onClose={() => setSelectedCard(null)}
           onUpdate={handleCardUpdate}
           onSave={saveDraftCard}

@@ -7,20 +7,22 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MemberAvatar } from '@/components/MemberAvatar';
-import { getCurrentUser, getNotificationsForUser } from '@/lib/settings';
+import { getCurrentUser, getNotificationsForUser, getUnreadNotificationCount } from '@/lib/settings';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { stages as defaultStages, teamMembers as defaultTeam } from '@/data/mockData';
 import { getStageColorClasses } from '@/lib/pipeline-utils';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import { Search, Filter, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
  
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 export default function Settings() {
   const { pipelineId = 'default' } = useParams();
   const navigate = useNavigate();
+  const currentUser = getCurrentUser();
+  const unreadCount = getUnreadNotificationCount(currentUser.id);
   const slugify = (name: string) => name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `stage-${Math.random().toString(36).slice(2,6)}`;
   const [tiers, setTiers] = useState<{ name: string; active: boolean }[]>(getSubscriptionTierObjects());
   const [newTier, setNewTier] = useState('');
@@ -116,15 +118,6 @@ export default function Settings() {
             <p className="text-sm text-muted-foreground">Manage tiers, staff, and stages</p>
           </div>
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input type="text" placeholder="Search..." className="pl-9 w-64" />
-            </div>
-            <Button variant="outline" size="sm">
-              <Filter className="w-4 h-4 mr-2" />
-              Filter
-            </Button>
-            
             <Select value={pipelineId} onValueChange={(id) => { try { localStorage.setItem('lastPipelineId', id); } catch {}; navigate(`/pipeline/${id}/settings`);} }>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="Select pipeline" />
@@ -137,8 +130,13 @@ export default function Settings() {
             </Select>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="rounded-full">
-                  <MemberAvatar member={getCurrentUser()} size="md" />
+                <button className="rounded-full relative">
+                  <MemberAvatar member={currentUser} size="md" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1.5 text-[10px] font-semibold text-white bg-red-500 rounded-full border-2 border-background">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">

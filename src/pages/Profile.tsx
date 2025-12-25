@@ -23,7 +23,7 @@ export default function Profile() {
   return (
     <>
       <Helmet><title>Profile</title></Helmet>
-      <AppHeader title="Profile" subtitle="Update your info and avatar" />
+      <AppHeader title="Profile" subtitle="Update your info and avatar" hideSearchAndFilter />
       <div className="p-6 space-y-6">
         <div className="flex items-center gap-4">
           <MemberAvatar member={{ id: initial.id, name, avatar, role: 'manager', email }} size="md" />
