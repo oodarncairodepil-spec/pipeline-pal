@@ -30,7 +30,13 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
   const [addSectionOpen, setAddSectionOpen] = useState(false);
   const [sectionName, setSectionName] = useState('');
   const [sectionColor, setSectionColor] = useState<'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost' | 'stage-purple' | 'stage-teal' | 'stage-indigo' | 'stage-pink' | 'stage-orange'>('stage-new');
-  const totalDeal = cards.reduce((sum, c) => sum + (c.dealValue || 0), 0);
+  
+  // Remove duplicate cards by ID to prevent React key warnings
+  const uniqueCards = cards.filter((card, index, self) => 
+    index === self.findIndex(c => c.id === card.id)
+  );
+  
+  const totalDeal = uniqueCards.reduce((sum, c) => sum + (c.dealValue || 0), 0);
   const formattedTotal = totalDeal.toLocaleString();
 
   return (
@@ -61,8 +67,6 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => { setStageName(lane.stage.name); setEditingOpen(true); }}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onAddCard(lane.id)}>Add card</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAddSectionOpen(true)}>Add section</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -100,7 +104,18 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
               <label className="text-xs text-muted-foreground">Section color</label>
               <Select value={sectionColor} onValueChange={(v) => setSectionColor(v as any)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select color" />
+                  <span style={{ pointerEvents: 'none' }}>
+                    {(() => {
+                      const colors = getStageColorClasses('new', sectionColor);
+                      return (
+                        <div className={cn('flex items-center gap-2 rounded-md px-2 py-1', colors.bgLight, colors.text)}>
+                          <div className={cn('w-4 h-4 rounded-full', colors.bg)} />
+                          <div className="h-3 w-12 rounded-sm bg-background/30" />
+                        </div>
+                      );
+                    })()}
+                  </span>
+                  <SelectValue placeholder="Select color" className="absolute opacity-0 pointer-events-none w-0 h-0 overflow-hidden">{''}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {(['stage-new','stage-called','stage-onboard','stage-live','stage-lost','stage-purple','stage-teal','stage-indigo','stage-pink','stage-orange'] as const).map((variant) => {
@@ -140,12 +155,12 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
               ref={provided.innerRef}
               {...provided.droppableProps}
               className={cn(
-                'min-h-[calc(100vh-16rem)] p-3 rounded-b-xl space-y-3 transition-colors duration-200',
-                'bg-muted/30',
+                'min-h-[calc(100vh-16rem)] max-h-[calc(100vh-10rem)] p-3 rounded-b-xl space-y-3 transition-colors duration-200',
+                'bg-muted/30 overflow-y-auto',
                 snapshot.isDraggingOver && 'bg-accent/50 ring-2 ring-primary/20'
               )}
             >
-              {cards.map((card, index) => (
+              {uniqueCards.map((card, index) => (
                 <KanbanCard
                   key={card.id}
                   card={card}
@@ -170,11 +185,11 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
           )}
         </Droppable>
       ) : (
-        <div className="p-3 rounded-b-xl space-y-4 bg-muted/30">
+        <div className="p-3 rounded-b-xl space-y-4 bg-muted/30 max-h-[calc(100vh-10rem)] overflow-y-auto">
           {/* Section containers */}
           {lane.sections?.map((sec) => {
             const colors = getStageColorClasses('new', sec.color as any);
-            const sectionCards = cards.filter(c => c.sectionId === sec.id);
+            const sectionCards = uniqueCards.filter(c => c.sectionId === sec.id);
             return (
               <div key={sec.id} className="relative">
                 {/* Header as separate droppable */}
@@ -238,7 +253,7 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, c
                   {...provided.droppableProps}
                   className={cn('p-2 space-y-3 rounded-b-lg', snapshot.isDraggingOver && 'bg-accent/50 ring-2 ring-primary/20')}
                 >
-                  {cards.filter(c => !c.sectionId).map((card, index) => (
+                  {uniqueCards.filter(c => !c.sectionId).map((card, index) => (
                     <KanbanCard
                       key={card.id}
                       card={card}

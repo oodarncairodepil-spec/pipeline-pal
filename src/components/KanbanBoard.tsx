@@ -1,40 +1,50 @@
 import { useState, useCallback, useEffect } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import { motion } from 'framer-motion';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Columns, Plus } from 'lucide-react';
 import { BoardState, LeadCard, StageId } from '@/types/pipeline';
 import { loadInitialBoardState } from '@/data/mockData';
-import { setPipelineStages, getPipelines, setPipelines, pushNotificationForUser } from '@/lib/settings';
+import { setPipelineStages, getPipelines, setPipelines, pushNotificationForUser, getCurrentUser, getUnreadNotificationCount } from '@/lib/settings';
 import { KanbanLane } from './KanbanLane';
 import { CardDetailPanel } from './CardDetailPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MemberAvatar } from './MemberAvatar';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { getNotificationsForUser, getUnreadNotificationCount } from '@/lib/settings';
+import { getNotificationsForUser } from '@/lib/settings';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getStageColorClasses } from '@/lib/pipeline-utils';
 import { cn } from '@/lib/utils';
+import * as dbCards from '@/lib/db/cards';
+import * as dbStages from '@/lib/db/stages';
+import * as dbUsers from '@/lib/db/users';
+import * as dbPipelines from '@/lib/db/pipelines';
+import { signOut } from '@/lib/auth';
 
 export function KanbanBoard() {
   const { pipelineId = 'default' } = useParams();
   const location = useLocation();
-  const [boardState, setBoardState] = useState<BoardState>(loadInitialBoardState(pipelineId));
+  const [boardState, setBoardState] = useState<BoardState>({
+    lanes: [],
+    cards: {},
+    stages: [],
+    teamMembers: [],
+  });
+  const [loading, setLoading] = useState(true);
   const [selectedCard, setSelectedCard] = useState<LeadCard | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [addColumnOpen, setAddColumnOpen] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
   const [newColumnColor, setNewColumnColor] = useState<'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost' | 'stage-purple' | 'stage-teal' | 'stage-indigo' | 'stage-pink' | 'stage-orange'>('stage-new');
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [pipelines, setPipelines] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [pipelineIdNum, setPipelineIdNum] = useState<number | null>(null);
   const uid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-
-  // Current user (simulated - in real app would come from auth)
-  const currentUser = boardState.teamMembers[0]; // Alex (Manager)
   const navigate = useNavigate();
-  const pipelines = getPipelines();
-  const pipelineTitle = `${(pipelines.find(p => p.id === pipelineId)?.name || 'Sales')} Pipeline`;
-  const unreadCount = getUnreadNotificationCount(currentUser.id);
+  const pipelineTitle = `${(pipelines.find(p => p.name === pipelineId)?.name || 'Sales')} Pipeline`;
   const slugify = (name: string) => name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `stage-${Math.random().toString(36).slice(2, 6)}`;
   const makeUniqueStageId = (base: string) => {
     let id = base;
@@ -46,10 +56,10 @@ export function KanbanBoard() {
     return id;
   };
 
-  const onDragEnd = useCallback((result: DropResult) => {
+  const onDragEnd = useCallback(async (result: DropResult) => {
     const { source, destination, draggableId } = result;
 
-    if (!destination) return;
+    if (!destination || !currentUser) return;
     const destinationId = destination.droppableId;
     const isSectionDrop = destinationId.startsWith('section:') || destinationId.startsWith('section-header:');
 
@@ -66,7 +76,7 @@ export function KanbanBoard() {
       if (sourceIndex === -1 || destIndex === -1) return;
       if (srcLaneId === destinationId && source.index === destination.index) return;
       newLanes[sourceIndex].cardIds = newLanes[sourceIndex].cardIds.filter(id => id !== draggableId);
-      const destIds = [...newLanes[destIndex].cardIds];
+      const destIds = [...newLanes[destIndex].cardIds].filter(id => id !== draggableId); // Remove duplicates first
       const insertAt = Math.min(Math.max(destination.index, 0), destIds.length);
       destIds.splice(insertAt, 0, draggableId);
       newLanes[destIndex].cardIds = destIds;
@@ -148,15 +158,13 @@ export function KanbanBoard() {
     const oldStageName = boardState.stages.find(s => s.id === card.stageId)?.name || '';
     const newStageId = laneId as StageId;
     const newStageName = boardState.stages.find(s => s.id === newStageId)?.name || '';
-    const updatedCards = {
-      ...boardState.cards,
-      [draggableId]: {
+    const updatedCard = {
         ...card,
         stageId: newStageId,
         sectionId,
         history: [
           ...card.history,
-          ...(card.stageId !== newStageId ? [{
+          ...(card.stageId !== newStageId && currentUser ? [{
             id: uid(),
             type: 'stage_change' as const,
             timestamp: new Date(),
@@ -164,17 +172,45 @@ export function KanbanBoard() {
             details: { from: oldStageName, to: newStageName },
           }] : []),
         ],
-      },
+    };
+
+    // Update in Supabase
+    try {
+      // Get numeric pipeline ID
+      const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+      if (numericId) {
+        await dbCards.updateCard(draggableId, { stageId: newStageId, sectionId }, numericId);
+      }
+      if (card.stageId !== newStageId) {
+        if (currentUser) {
+          await dbCards.addCardHistory(draggableId, {
+            id: uid(),
+            type: 'stage_change',
+            userId: currentUser?.id || '',
+            details: { from: oldStageName, to: newStageName },
+            timestamp: new Date(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error updating card in Supabase:', error);
+    }
+
+    const updatedCards = {
+      ...boardState.cards,
+      [draggableId]: updatedCard,
     };
 
     setBoardState({ ...boardState, lanes: newLanes, cards: updatedCards });
-  }, [boardState, currentUser]);
+  }, [boardState, currentUser, pipelineId, pipelineIdNum]);
 
   const handleCardClick = useCallback((card: LeadCard) => {
     setSelectedCard(card);
   }, []);
 
-  const handleCardUpdate = useCallback((cardId: string, updates: Partial<LeadCard>) => {
+  const handleCardUpdate = useCallback(async (cardId: string, updates: Partial<LeadCard>) => {
+    if (!currentUser) return;
+    
     setBoardState(prev => {
       const exists = Boolean(prev.cards[cardId]);
       if (!exists) return prev;
@@ -209,16 +245,55 @@ export function KanbanBoard() {
         });
       }
       if (Array.isArray(updatedCard.watchers) && updatedCard.watchers.length > 0) {
+        // Get numeric pipeline ID for notifications (async, but we'll handle it separately)
+        const numericId = pipelineIdNum || 0;
         updatedCard.watchers.forEach(uid => {
-          if (uid !== currentUser.id) {
-            pushNotificationForUser(uid, { id: uid(), cardId, clientName: updatedCard.clientName || '', note: 'Card updated', timestamp: new Date().toISOString(), pipelineId });
+          if (currentUser && uid !== currentUser.id) {
+            if (numericId) {
+              pushNotificationForUser(uid, { id: uid(), cardId, clientName: updatedCard.clientName || '', note: 'Card updated', timestamp: new Date().toISOString(), pipelineId: numericId });
+            }
           }
         });
       }
       return { ...prev, lanes: newLanes, cards: { ...prev.cards, [cardId]: updatedCard } };
     });
     setSelectedCard(prev => (prev?.id === cardId ? { ...prev, ...updates } : prev));
-  }, []);
+
+    // Update in Supabase (only if authenticated)
+    (async () => {
+      try {
+        const { getCurrentAuthUser } = await import('@/lib/auth');
+        const authUser = await getCurrentAuthUser();
+        if (authUser) {
+          // Get numeric pipeline ID
+          const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+          if (numericId) {
+            await dbCards.updateCard(cardId, updates, numericId);
+            
+            // Send notifications to watchers
+            const card = boardState.cards[cardId];
+            if (card && Array.isArray(card.watchers) && card.watchers.length > 0 && currentUser) {
+              card.watchers.forEach(uid => {
+                if (uid !== currentUser.id) {
+                  pushNotificationForUser(uid, { 
+                    id: uid(), 
+                    cardId, 
+                    clientName: card.clientName || '', 
+                    note: 'Card updated', 
+                    timestamp: new Date().toISOString(), 
+                    pipelineId: numericId 
+                  });
+                }
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error updating card in Supabase:', error);
+        // Continue even if Supabase update fails - local state is already updated
+      }
+    })();
+  }, [boardState.cards, currentUser, pipelineId, pipelineIdNum]);
 
   const handleAddCard = useCallback((stageId: string) => {
     const id = uid();
@@ -248,15 +323,252 @@ export function KanbanBoard() {
     setSelectedCard(draft);
   }, []);
 
-  const saveDraftCard = useCallback((card: LeadCard) => {
+  const saveDraftCard = useCallback(async (card: LeadCard) => {
+    console.log('saveDraftCard called with card:', card.id, card.clientName);
+    
+    // Validate client name is required
+    if (!card.clientName || !card.clientName.trim()) {
+      console.warn('Cannot save card: client name is required');
+      alert('Please enter a client name before saving');
+      return;
+    }
+
+    // Check authentication first
+    let authUser = null;
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      authUser = await getCurrentAuthUser();
+      console.log('Auth user:', authUser ? authUser.id : 'null');
+    } catch (error) {
+      console.error('Error checking authentication:', error);
+    }
+
+    // Use currentUser for history, or fallback
+    const userForHistory = currentUser || (authUser ? { id: authUser.id, name: authUser.email?.split('@')[0] || 'User', email: authUser.email } : null);
+    
+    if (!userForHistory) {
+      console.warn('Cannot save card: no user available');
+      alert('Please log in to save cards');
+      return;
+    }
+
+    // Check if this is a new card or an existing one
+    const isNewCard = !boardState.cards[card.id];
+    console.log('Is new card:', isNewCard);
+    
+    const cardWithHistory = {
+      ...card,
+      history: isNewCard ? [
+        ...card.history,
+        {
+          id: uid(),
+          type: 'card_created' as const,
+          timestamp: new Date(),
+          user: userForHistory,
+          details: {},
+        },
+      ] : card.history,
+    };
+
+    // Update local state first
     setBoardState(prev => ({
       ...prev,
-      cards: { ...prev.cards, [card.id]: { ...card, history: [ ...card.history, { id: uid(), type: 'card_created', timestamp: new Date(), user: currentUser, details: {} } ] } },
+      cards: { ...prev.cards, [card.id]: cardWithHistory },
+      lanes: prev.lanes.map(lane => 
+        lane.id === card.stageId 
+          ? { ...lane, cardIds: lane.cardIds.includes(card.id) ? lane.cardIds : [...lane.cardIds, card.id] }
+          : lane
+      ),
+    }));
+
+    // Save to Supabase (only if authenticated)
+    if (authUser) {
+      try {
+        console.log('Attempting to save to Supabase...', { cardId: card.id, pipelineId, authUserId: authUser.id });
+        
+        // Ensure user profile exists in public.users (use upsert)
+        try {
+          const { getSupabaseClient } = await import('@/lib/supabase');
+          const supabase = getSupabaseClient();
+          const userProfile = await dbUsers.getUser(authUser.id);
+          if (!userProfile) {
+            console.log('Creating user profile...');
+            // Use upsert to create or update
+            const { error: upsertError } = await supabase
+              .from('users')
+              .upsert({
+                id: authUser.id,
+                name: authUser.email?.split('@')[0] || 'User',
+                email: authUser.email,
+                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(authUser.email || 'User')}&backgroundColor=b6e3f4`,
+                role: 'staff',
+              }, { onConflict: 'id' });
+            if (upsertError) {
+              console.warn('Error creating user profile:', upsertError);
+            }
+          }
+          
+          // Ensure user is a member of the pipeline (required for RLS)
+          // Get numeric pipeline ID from name (slug)
+          let numericPipelineId: number | null = pipelineIdNum;
+          if (!numericPipelineId) {
+            const pipeline = await dbPipelines.getPipelineByName(pipelineId);
+            if (pipeline) {
+              numericPipelineId = pipeline.id;
+              setPipelineIdNum(pipeline.id);
+            } else {
+              // Pipeline doesn't exist - redirect to settings or first available pipeline
+              console.warn(`Pipeline "${pipelineId}" not found. Redirecting...`);
+              try {
+                const { getPipelines } = await import('@/lib/settings');
+                const pipelines = await getPipelines();
+                if (pipelines.length > 0) {
+                  // Redirect to first available pipeline
+                  navigate(`/pipeline/${pipelines[0].name}`, { replace: true });
+                } else {
+                  // No pipelines, redirect to settings
+                  navigate('/settings', { replace: true });
+                }
+                return;
+              } catch (redirectError: any) {
+                console.error('Error redirecting:', redirectError);
+                // Fallback: redirect to settings
+                navigate('/settings', { replace: true });
+                return;
+              }
+            }
+          }
+          
+          // Ensure user is a member
+          if (numericPipelineId) {
+            try {
+              const members = await dbUsers.getPipelineMembers(numericPipelineId);
+              const isMember = members.some(m => m.id === authUser.id);
+              if (!isMember) {
+                console.log('Adding user as pipeline member...');
+                await dbUsers.addPipelineMember(numericPipelineId, authUser.id, 'manager', 'accepted');
+                console.log('✅ User added as pipeline member');
+              }
+            } catch (memberError: any) {
+              console.warn('Error ensuring pipeline membership:', memberError);
+              // If it's an RLS error, the user might not have permission to add themselves
+              // Try to continue anyway - the card save might still work if they're already a member
+              if (memberError?.code === '42501') {
+                console.warn('RLS policy blocked membership addition, but continuing with save attempt');
+              }
+            }
+          } else {
+            throw new Error('Pipeline ID not found');
+          }
+        } catch (userError) {
+          console.warn('Error ensuring user profile exists:', userError);
+          // Continue anyway
+        }
+        
+        // Get numeric pipeline ID (should be set by now)
+        const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+        if (!numericId) {
+          throw new Error('Pipeline ID not found');
+        }
+        
+        if (isNewCard) {
+          // Create new card
+          console.log('Creating new card in Supabase...');
+          await dbCards.createCard(cardWithHistory, numericId);
+          console.log('✅ Card created in Supabase successfully');
+        } else {
+          // Update existing card
+          console.log('Updating existing card in Supabase...');
+          await dbCards.updateCard(card.id, cardWithHistory, numericId);
+          console.log('✅ Card updated in Supabase successfully');
+        }
+      } catch (error: any) {
+        console.error('❌ Error saving card to Supabase:', error);
+        const errorMessage = error?.message || error?.code || 'Unknown error';
+        console.error('Full error details:', error);
+        alert(`Failed to save card: ${errorMessage}`);
+        // Card is already in local state, so it will work offline
+      }
+    } else {
+      console.warn('⚠️ User not authenticated, card saved locally only');
+      alert('Not logged in. Card saved locally but will not sync to server.');
+    }
+
+    setBoardState(prev => ({
+      ...prev,
+      cards: { ...prev.cards, [card.id]: cardWithHistory },
       lanes: prev.lanes.map(lane =>
         lane.id === card.stageId ? { ...lane, cardIds: [...lane.cardIds, card.id] } : lane
       ),
     }));
     setSelectedCard(null);
+  }, [currentUser, pipelineId, boardState.cards]);
+
+  // Load initial board state
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // Get numeric pipeline ID from name (slug)
+        let numericId: number | null = null;
+        try {
+          const pipeline = await dbPipelines.getPipelineByName(pipelineId);
+          if (pipeline) {
+            numericId = pipeline.id;
+            setPipelineIdNum(pipeline.id);
+          }
+        } catch (error) {
+          console.error('Error getting pipeline ID:', error);
+        }
+
+        const [boardData, user, pipelineList] = await Promise.all([
+          loadInitialBoardState(pipelineId),
+          getCurrentUser(),
+          getPipelines(),
+        ]);
+        setBoardState(boardData);
+        setCurrentUser(user);
+        setPipelines(pipelineList);
+        
+        // Update numeric ID if we got it from boardData
+        if (!numericId && pipelineList.length > 0) {
+          const found = pipelineList.find(p => p.name === pipelineId);
+          if (found) {
+            numericId = found.id;
+            setPipelineIdNum(found.id);
+          }
+        }
+        
+        // Load unread count
+        if (user.id) {
+          try {
+            const count = await getUnreadNotificationCount(user.id);
+            setUnreadCount(count);
+          } catch (error) {
+            console.error('Error loading unread count:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading board data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [pipelineId]);
+
+  // Update unread count periodically
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(async () => {
+      try {
+        const count = await getUnreadNotificationCount(currentUser.id);
+        setUnreadCount(count);
+      } catch (error) {
+        console.error('Error updating unread count:', error);
+      }
+    }, 30000); // Update every 30 seconds
+    return () => clearInterval(interval);
   }, [currentUser]);
 
   useEffect(() => {
@@ -266,9 +578,9 @@ export function KanbanBoard() {
       setSelectedCard(boardState.cards[openId]);
     }
     try { localStorage.setItem('lastPipelineId', pipelineId); } catch {}
-  }, [location.search, boardState.cards]);
+  }, [location.search, boardState.cards, pipelineId]);
 
-  const handleCreateColumn = useCallback(() => {
+  const handleCreateColumn = useCallback(async () => {
     const name = newColumnName.trim();
     if (!name) return;
     const base = slugify(name);
@@ -280,17 +592,39 @@ export function KanbanBoard() {
       stages: [...prev.stages, stage],
       lanes: [...prev.lanes, { id, stage, cardIds: [] }],
     }));
-    setPipelineStages(pipelineId, [...boardState.stages, stage].map((s: any) => ({ id: s.id, name: s.name, color: s.color })));
+    
+    // Get numeric pipeline ID and save stage
+    try {
+      const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+      if (numericId) {
+        await setPipelineStages(numericId, [...boardState.stages, stage].map((s: any) => ({ id: s.id, name: s.name, color: s.color })));
+      } else {
+        // Fallback to using name (will be converted in setPipelineStages)
+        await setPipelineStages(pipelineId, [...boardState.stages, stage].map((s: any) => ({ id: s.id, name: s.name, color: s.color })));
+      }
+    } catch (error) {
+      console.error('Error saving stage:', error);
+    }
+    
     setAddColumnOpen(false);
     setNewColumnName('');
     setNewColumnColor('stage-new');
-  }, [boardState, newColumnName, newColumnColor]);
+  }, [boardState, newColumnName, newColumnColor, pipelineIdNum, pipelineId]);
 
-  const editStageName = (stageId: string, newName: string) => {
+  const editStageName = async (stageId: string, newName: string) => {
+    // Update in Supabase
+    try {
+      const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+      if (numericId) {
+        await dbStages.updatePipelineStage(numericId, stageId, { name: newName });
+      }
+    } catch (error) {
+      console.error('Error updating stage in Supabase:', error);
+    }
+
     setBoardState(prev => {
       const newStages = prev.stages.map(s => s.id === stageId ? { ...s, name: newName } : s);
       const newLanes = prev.lanes.map(l => l.stage.id === stageId ? { ...l, stage: { ...l.stage, name: newName } } : l);
-      setPipelineStages(pipelineId, newStages.map(s => ({ id: s.id, name: s.name, color: (s as any).color })));
       return { ...prev, stages: newStages, lanes: newLanes };
     });
   };
@@ -306,18 +640,64 @@ export function KanbanBoard() {
     });
   }, []);
 
-  const addSection = useCallback((stageId: string, name: string, color: string) => {
+  const addSection = useCallback(async (stageId: string, name: string, color: string) => {
+    const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+    if (!numericId) {
+      console.error('Pipeline ID not found');
+      return;
+    }
+    const sectionId = `section-${Math.random().toString(36).slice(2,8)}`;
+    
+    // Find the lane to get existing sections for order calculation
+    const lane = boardState.lanes.find(l => l.id === stageId);
+    const existingSections = lane?.sections || [];
+    const order = existingSections.length;
+    
+    
+    // Update local state immediately for responsiveness
     setBoardState(prev => ({
       ...prev,
-      lanes: prev.lanes.map(l => l.id === stageId ? { ...l, sections: [ ...(l.sections || []), { id: `section-${Math.random().toString(36).slice(2,8)}`, name, color, cardIds: [] } ] } : l)
+      lanes: prev.lanes.map(l => 
+        l.id === stageId 
+          ? { 
+              ...l, 
+              sections: [ 
+                ...(l.sections || []), 
+                { id: sectionId, name, color, cardIds: [] } 
+              ] 
+            } 
+          : l
+      )
     }));
-  }, []);
+    
+    // Save to Supabase
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        await dbStages.createPipelineSection(numericId, stageId, {
+          id: sectionId,
+          name,
+          color,
+          order,
+        });
+        console.log('✅ Section created in Supabase successfully');
+      } else {
+        console.warn('User not authenticated, section saved locally only');
+      }
+    } catch (error: any) {
+      console.error('❌ Error saving section to Supabase:', error);
+      alert(`Error saving section: ${error.message || 'Unknown error'}`);
+      // Section is already in local state, so it will work offline
+    }
+  }, [boardState.lanes, pipelineId]);
 
   // Filter cards based on search
   const filteredLanes = boardState.lanes.map(lane => ({
     ...lane,
     cardIds: lane.cardIds.filter(cardId => {
       const card = boardState.cards[cardId];
+      if (!card) return false;
       return card.clientName.toLowerCase().includes(searchQuery.toLowerCase());
     }),
   }));
@@ -358,13 +738,13 @@ export function KanbanBoard() {
 
             {/* Pipeline Switcher */}
             <div className="flex items-center gap-2">
-              <Select value={pipelineId} onValueChange={(id) => { try { localStorage.setItem('lastPipelineId', id); } catch {}; navigate(`/pipeline/${id}`); }}>
+              <Select value={pipelineId} onValueChange={(name) => { try { localStorage.setItem('lastPipelineName', name); } catch {}; navigate(`/pipeline/${name}`); }}>
                 <SelectTrigger className="w-44">
                   <SelectValue placeholder="Select pipeline" />
                 </SelectTrigger>
                 <SelectContent>
-                  {pipelines.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  {pipelines.filter(p => p.name && p.name.trim() !== '').map(p => (
+                    <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -385,9 +765,20 @@ export function KanbanBoard() {
                   <DropdownMenuItem onClick={() => navigate(`/pipeline/${pipelineId}/settings`)}>Settings</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate(`/profile`)}>Profile</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate(`/notifications`)}>
-                    Notifications ({getNotificationsForUser(currentUser.id).length})
+                    Notifications
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { try { localStorage.removeItem('sb:token'); } catch {}; navigate('/login'); }}>Logout</DropdownMenuItem>
+                  <DropdownMenuItem onClick={async () => {
+                    try {
+                      await signOut();
+                    } catch (error) {
+                      console.error('Error signing out:', error);
+                    }
+                    // Clear legacy token as fallback
+                    try {
+                      localStorage.removeItem('sb:token');
+                    } catch {}
+                    navigate('/login');
+                  }}>Logout</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -396,6 +787,32 @@ export function KanbanBoard() {
       </motion.header>
 
       {/* Board */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-muted-foreground">Loading pipeline...</div>
+        </div>
+      ) : filteredLanes.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="text-center max-w-md">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Columns className="w-8 h-8 text-muted-foreground" />
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold mb-2">No stages yet</h3>
+            <p className="text-muted-foreground mb-6">
+              Get started by creating your first stage or column to organize your leads and opportunities.
+            </p>
+            <Button
+              onClick={() => setAddColumnOpen(true)}
+              className="inline-flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Create First Stage
+            </Button>
+          </div>
+        </div>
+      ) : (
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
           <div className="flex gap-5 h-full">
@@ -415,9 +832,10 @@ export function KanbanBoard() {
           </div>
         </div>
       </DragDropContext>
+      )}
 
       {/* Card Detail Panel */}
-      {selectedCard && (
+      {selectedCard && currentUser && (
         <CardDetailPanel
           card={selectedCard}
           stages={boardState.stages}
@@ -446,7 +864,18 @@ export function KanbanBoard() {
               <label className="text-xs text-muted-foreground">Column header color</label>
               <Select value={newColumnColor} onValueChange={(v) => setNewColumnColor(v as any)}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select color" />
+                  <span style={{ pointerEvents: 'none' }}>
+                    {(() => {
+                      const colors = getStageColorClasses('new', newColumnColor);
+                      return (
+                        <div className={cn('flex items-center gap-2 rounded-md px-2 py-1', colors.bgLight, colors.text)}>
+                          <div className={cn('w-4 h-4 rounded-full', colors.bg)} />
+                          <div className="h-3 w-12 rounded-sm bg-background/30" />
+                        </div>
+                      );
+                    })()}
+                  </span>
+                  <SelectValue placeholder="Select color" className="absolute opacity-0 pointer-events-none w-0 h-0 overflow-hidden">{''}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {(['stage-new','stage-called','stage-onboard','stage-live','stage-lost','stage-purple','stage-teal','stage-indigo','stage-pink','stage-orange'] as const).map((variant) => {

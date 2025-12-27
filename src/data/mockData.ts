@@ -1,15 +1,104 @@
 import { BoardState, Stage, TeamMember, LeadCard, Lane, StageId } from '@/types/pipeline';
 import { getPipelineMembers, getPipelineStages } from '@/lib/settings';
+import * as dbCards from '@/lib/db/cards';
+import * as dbStages from '@/lib/db/stages';
+import * as dbUsers from '@/lib/db/users';
+import * as dbPipelines from '@/lib/db/pipelines';
 
-export const stages: Stage[] = [
-  { id: 'new', name: 'New', color: 'stage-new', order: 0 },
-  { id: 'called', name: 'Called', color: 'stage-called', order: 1 },
-  { id: 'onboard', name: 'Onboard', color: 'stage-onboard', order: 2 },
-  { id: 'live', name: 'Live', color: 'stage-live', order: 3 },
-  { id: 'lost', name: 'Lost', color: 'stage-lost', order: 4 },
-];
+export const loadInitialBoardState = async (pipelineName: string = 'default'): Promise<BoardState> => {
+  try {
+    // Check if user is authenticated before trying to create pipelines
+    const { getCurrentAuthUser } = await import('../lib/auth');
+    let isAuthenticated = false;
+    try {
+      const authUser = await getCurrentAuthUser();
+      isAuthenticated = !!authUser;
+    } catch {}
 
-export const teamMembers: TeamMember[] = [
+    // Convert pipeline name (slug) to numeric ID
+    let pipelineIdNum: number | null = null;
+    if (isAuthenticated) {
+      try {
+        // Check if pipeline exists by name
+        const pipeline = await dbPipelines.getPipelineByName(pipelineName);
+        if (pipeline) {
+          pipelineIdNum = pipeline.id;
+        } else {
+          // Pipeline doesn't exist - don't create automatically
+          // Return empty state instead
+          console.warn(`Pipeline "${pipelineName}" not found. Returning empty state.`);
+        }
+      } catch (error) {
+        console.error('Error checking pipeline:', error);
+      }
+    }
+
+    // If we don't have a numeric ID, we can't proceed with database operations
+    if (!pipelineIdNum && isAuthenticated) {
+      console.warn('No pipeline ID found, returning empty state');
+      return {
+        lanes: [],
+        cards: {},
+        stages: [],
+        teamMembers: [],
+      };
+    }
+
+    // Fetch stages (will return empty if not authenticated or no pipeline ID)
+    let stages: Stage[] = [];
+    if (pipelineIdNum) {
+      try {
+        stages = await dbStages.getPipelineStages(pipelineIdNum);
+      } catch (error) {
+        console.error('Error fetching stages:', error);
+      }
+    }
+    
+    // If no stages exist and user is authenticated, create default stages
+    if (stages.length === 0 && isAuthenticated && pipelineIdNum) {
+      const defaultStages = getDefaultStagesForPipeline(pipelineName);
+      for (const stage of defaultStages) {
+        try {
+          await dbStages.createPipelineStage(pipelineIdNum, stage);
+        } catch (error) {
+          console.error(`Error creating stage ${stage.id}:`, error);
+        }
+      }
+      try {
+        stages = await dbStages.getPipelineStages(pipelineIdNum);
+      } catch (error) {
+        console.error('Error fetching stages after creation:', error);
+      }
+    }
+    
+    // If still no stages, use defaults
+    if (stages.length === 0) {
+      stages = getDefaultStagesForPipeline(pipelineName);
+    }
+
+    // Fetch team members
+    let teamMembers: TeamMember[] = [];
+    if (isAuthenticated && pipelineIdNum) {
+      try {
+        teamMembers = await dbUsers.getPipelineMembers(pipelineIdNum);
+        
+        // If no members, try to get all users (for initial setup)
+        if (teamMembers.length === 0) {
+          try {
+            const allUsers = await dbUsers.getUsers();
+            teamMembers = allUsers;
+          } catch (error) {
+            console.error('Error fetching users:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching pipeline members:', error);
+      }
+    }
+    
+    // Fallback to default team if no members found
+    if (teamMembers.length === 0) {
+      teamMembers = [
   {
     id: 'alex',
     name: 'Alex',
@@ -24,340 +113,97 @@ export const teamMembers: TeamMember[] = [
     role: 'staff',
     email: 'jamie@example.com',
   },
-  {
-    id: 'taylor',
-    name: 'Taylor',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Taylor&backgroundColor=ffd5dc',
-    role: 'staff',
-    email: 'taylor@example.com',
-  },
-];
+      ];
+    }
 
-export const mockCards: Record<string, LeadCard> = {
-  'card-1': {
-    id: 'card-1',
-    clientName: 'Bakery Aja',
-    instagram: '@bakeryaja',
-    tiktok: '@bakeryaja.id',
-    phone: '+62 812-3456-7890',
-    subscriptionTier: 'Pro',
-    dealValue: 15000000,
-    liveUrl: 'https://bakeryaja.id',
-    instagramFollowers: 12500,
-    tiktokFollowers: 8200,
-    startDate: new Date('2025-12-10'),
-    stageId: 'called',
-    assignedTo: teamMembers[1], // Jamie
-    notes: [
-      {
-        id: 'note-1',
-        content: 'Initial call done, interested in Pro tier.',
-        createdAt: new Date('2025-12-10T10:30:00'),
-        createdBy: teamMembers[1],
-      },
-      {
-        id: 'note-2',
-        content: 'Sent proposal, waiting for reply.',
-        createdAt: new Date('2025-12-12T14:15:00'),
-        createdBy: teamMembers[1],
-      },
-    ],
-    history: [
-      {
-        id: 'hist-1',
-        type: 'card_created',
-        timestamp: new Date('2025-12-10T09:00:00'),
-        user: teamMembers[0],
-        details: {},
-      },
-      {
-        id: 'hist-2',
-        type: 'stage_change',
-        timestamp: new Date('2025-12-10T10:30:00'),
-        user: teamMembers[1],
-        details: { from: 'New', to: 'Called' },
-      },
-      {
-        id: 'hist-3',
-        type: 'note_added',
-        timestamp: new Date('2025-12-10T10:30:00'),
-        user: teamMembers[1],
-        details: { note: 'Initial call done, interested in Pro tier.' },
-      },
-    ],
-    files: [
-      {
-        id: 'file-1',
-        name: 'proposal_bakeryaja.pdf',
-        url: '#',
-        type: 'document',
-        size: 245000,
-        uploadedAt: new Date('2025-12-12T14:00:00'),
-        uploadedBy: teamMembers[1],
-      },
-      {
-        id: 'file-2',
-        name: 'logo_bakeryaja.png',
-        url: '#',
-        type: 'image',
-        size: 85000,
-        uploadedAt: new Date('2025-12-10T09:30:00'),
-        uploadedBy: teamMembers[0],
-      },
-    ],
-  },
-  'card-2': {
-    id: 'card-2',
-    clientName: 'Kopi Kita',
-    instagram: '@kopikita',
-    tiktok: '@kopikita.id',
-    phone: '+62 812-9876-5432',
-    subscriptionTier: 'Basic',
-    dealValue: 10000000,
-    liveUrl: 'https://kopikita.id',
-    instagramFollowers: 5300,
-    tiktokFollowers: 3100,
-    startDate: new Date('2025-12-18'),
-    stageId: 'new',
-    assignedTo: teamMembers[2], // Taylor
-    notes: [
-      {
-        id: 'note-3',
-        content: 'Lead captured from Instagram DM.',
-        createdAt: new Date('2025-12-18T11:00:00'),
-        createdBy: teamMembers[2],
-      },
-      {
-        id: 'note-4',
-        content: 'First follow-up message sent.',
-        createdAt: new Date('2025-12-19T09:30:00'),
-        createdBy: teamMembers[2],
-      },
-    ],
-    history: [
-      {
-        id: 'hist-4',
-        type: 'card_created',
-        timestamp: new Date('2025-12-18T11:00:00'),
-        user: teamMembers[2],
-        details: {},
-      },
-      {
-        id: 'hist-5',
-        type: 'note_added',
-        timestamp: new Date('2025-12-18T11:00:00'),
-        user: teamMembers[2],
-        details: { note: 'Lead captured from Instagram DM.' },
-      },
-    ],
-    files: [
-      {
-        id: 'file-3',
-        name: 'logo_kopikita.png',
-        url: '#',
-        type: 'image',
-        size: 72000,
-        uploadedAt: new Date('2025-12-18T11:05:00'),
-        uploadedBy: teamMembers[2],
-      },
-    ],
-  },
-  'card-3': {
-    id: 'card-3',
-    clientName: 'Warung Nasi Sedap',
-    instagram: '@warungnasisedap',
-    tiktok: '@nasisedap.id',
-    phone: '+62 813-5555-1234',
-    subscriptionTier: 'Enterprise',
-    dealValue: 50000000,
-    liveUrl: 'https://warungnasisedap.com',
-    instagramFollowers: 45000,
-    tiktokFollowers: 32000,
-    startDate: new Date('2025-11-15'),
-    stageId: 'live',
-    assignedTo: teamMembers[0], // Alex
-    notes: [
-      {
-        id: 'note-5',
-        content: 'Successfully onboarded, site is now live!',
-        createdAt: new Date('2025-12-01T16:00:00'),
-        createdBy: teamMembers[0],
-      },
-    ],
-    history: [
-      {
-        id: 'hist-6',
-        type: 'card_created',
-        timestamp: new Date('2025-11-15T10:00:00'),
-        user: teamMembers[0],
-        details: {},
-      },
-      {
-        id: 'hist-7',
-        type: 'stage_change',
-        timestamp: new Date('2025-12-01T16:00:00'),
-        user: teamMembers[0],
-        details: { from: 'Onboard', to: 'Live' },
-      },
-    ],
-    files: [],
-  },
-  'card-4': {
-    id: 'card-4',
-    clientName: 'Toko Baju Modern',
-    instagram: '@tokobajumodern',
-    tiktok: '@tokobaju',
-    tokopedia: '@tokobaju.stores',
-    shopee: '@tokobaju.shop',
-    phone: '+62 811-2222-3333',
-    subscriptionTier: 'Basic',
-    dealValue: 7000000,
-    instagramFollowers: 24800,
-    tiktokFollowers: 99900,
-    tokopediaFollowers: 178000,
-    shopeeFollowers: 25300,
-    startDate: new Date('2025-12-20'),
-    stageId: 'new',
-    notes: [],
-    history: [
-      {
-        id: 'hist-8',
-        type: 'card_created',
-        timestamp: new Date('2025-12-20T14:00:00'),
-        user: teamMembers[1],
-        details: {},
-      },
-    ],
-    files: [],
-  },
-  'card-5': {
-    id: 'card-5',
-    clientName: 'Salon Cantik',
-    instagram: '@saloncantik.id',
-    tiktok: '@saloncantik',
-    phone: '+62 812-7777-8888',
-    subscriptionTier: 'Pro',
-    dealValue: 12000000,
-    instagramFollowers: 8900,
-    tiktokFollowers: 5600,
-    startDate: new Date('2025-12-05'),
-    stageId: 'onboard',
-    assignedTo: teamMembers[1], // Jamie
-    notes: [
-      {
-        id: 'note-6',
-        content: 'Contract signed, starting onboarding process.',
-        createdAt: new Date('2025-12-15T11:00:00'),
-        createdBy: teamMembers[1],
-      },
-    ],
-    history: [
-      {
-        id: 'hist-9',
-        type: 'card_created',
-        timestamp: new Date('2025-12-05T09:00:00'),
-        user: teamMembers[1],
-        details: {},
-      },
-      {
-        id: 'hist-10',
-        type: 'stage_change',
-        timestamp: new Date('2025-12-15T11:00:00'),
-        user: teamMembers[1],
-        details: { from: 'Called', to: 'Onboard' },
-      },
-    ],
-    files: [],
-  },
-  'card-6': {
-    id: 'card-6',
-    clientName: 'Gym Sehat',
-    instagram: '@gymsehat',
-    phone: '+62 815-9999-0000',
-    subscriptionTier: 'Pro',
-    dealValue: 0,
-    instagramFollowers: 15200,
-    startDate: new Date('2025-11-20'),
-    stageId: 'lost',
-    notes: [
-      {
-        id: 'note-7',
-        content: 'Client decided to go with competitor. Budget constraints.',
-        createdAt: new Date('2025-12-10T15:00:00'),
-        createdBy: teamMembers[0],
-      },
-    ],
-    history: [
-      {
-        id: 'hist-11',
-        type: 'card_created',
-        timestamp: new Date('2025-11-20T10:00:00'),
-        user: teamMembers[0],
-        details: {},
-      },
-      {
-        id: 'hist-12',
-        type: 'stage_change',
-        timestamp: new Date('2025-12-10T15:00:00'),
-        user: teamMembers[0],
-        details: { from: 'Onboard', to: 'Lost' },
-      },
-    ],
-    files: [],
-  },
-};
+    // Fetch cards
+    let cards: Record<string, LeadCard> = {};
+    if (isAuthenticated && pipelineIdNum) {
+      try {
+        cards = await dbCards.getCards(pipelineIdNum);
+      } catch (error) {
+        console.error('Error fetching cards:', error);
+      }
+    }
 
-export const lanes: Lane[] = [
-  { id: 'new', stage: stages[0], cardIds: ['card-2', 'card-4'] },
-  { id: 'called', stage: stages[1], cardIds: ['card-1'] },
-  { id: 'onboard', stage: stages[2], cardIds: ['card-5'] },
-  { id: 'live', stage: stages[3], cardIds: ['card-3'] },
-  { id: 'lost', stage: stages[4], cardIds: ['card-6'] },
-];
+    // Build lanes from stages
+    const lanes: Lane[] = stages.map(stage => {
+      const stageCards = Object.values(cards).filter(c => c.stageId === stage.id);
+      const cardIds = stageCards.map(c => c.id);
+      
+      // Get sections for this stage
+      return {
+        id: stage.id,
+        stage,
+        cardIds,
+        sections: [], // Sections will be loaded separately if needed
+      };
+    });
 
-export const loadInitialBoardState = (pipelineId: string = 'default'): BoardState => {
-  const stageOverrides = getPipelineStages(pipelineId);
-  let finalStages: Stage[] = [...stages];
-  if (Array.isArray(stageOverrides) && stageOverrides.length > 0) {
-    const map = new Map<string, Stage>();
-    finalStages.forEach(s => map.set(s.id, s));
-    let addCount = 0;
-    const maxOrder = finalStages.reduce((m, s) => Math.max(m, s.order || 0), 0);
-    stageOverrides.forEach((o: any) => {
-      if (o && o.id && o.name) {
-        const existing = map.get(o.id as StageId);
-        if (existing) {
-          map.set(o.id, { ...existing, name: o.name, color: o.color || existing.color });
-        } else {
-          const newStage: Stage = {
-            id: o.id as StageId,
-            name: o.name as string,
-            color: (o.color as string) || 'stage-new',
-            order: typeof o.order === 'number' ? o.order : maxOrder + (++addCount),
-          };
-          map.set(newStage.id, newStage);
+    // Load sections for each lane
+    if (pipelineIdNum) {
+      for (const lane of lanes) {
+        try {
+          const sections = await dbStages.getPipelineSections(pipelineIdNum, lane.id);
+          if (sections.length > 0) {
+            lane.sections = sections;
+          }
+        } catch (error) {
+          console.error(`Error loading sections for stage ${lane.id}:`, error);
         }
       }
-    });
-    finalStages = Array.from(map.values()).sort((a, b) => (a.order || 0) - (b.order || 0));
-  }
+    }
 
-  const teamOverrides = getPipelineMembers(pipelineId);
-  const finalTeam: TeamMember[] = Array.isArray(teamOverrides) && teamOverrides.length > 0
-    ? teamOverrides as any
-    : teamMembers;
-
-  const computedLanes: Lane[] = finalStages.map(s => ({
-    id: s.id,
-    stage: s,
-    cardIds: Object.values(mockCards).filter(c => c.stageId === s.id).map(c => c.id),
-    sections: [],
-  }));
-
+    return {
+      lanes,
+      cards,
+      stages,
+      teamMembers,
+    };
+  } catch (error) {
+    console.error('Error loading board state:', error);
+    // Return empty state on error
   return {
-    lanes: computedLanes,
-    cards: mockCards,
-    stages: finalStages,
-    teamMembers: finalTeam,
-  };
+      lanes: [],
+      cards: {},
+      stages: [],
+      teamMembers: [],
+    };
+  }
 };
+
+// Default stages for different pipeline types
+// Note: pipelineName is the slug/name, not the numeric ID
+const getDefaultStagesForPipeline = (pipelineName: string): Stage[] => {
+  if (pipelineName === 'retail' || pipelineName.toLowerCase().includes('retail')) {
+    return [
+      { id: 'prospect', name: 'Prospect', color: 'stage-indigo', order: 0 },
+      { id: 'demo', name: 'Demo', color: 'stage-teal', order: 1 },
+      { id: 'negotiation', name: 'Negotiation', color: 'stage-orange', order: 2 },
+      { id: 'won', name: 'Won', color: 'stage-live', order: 3 },
+      { id: 'lost', name: 'Lost', color: 'stage-lost', order: 4 },
+    ];
+  }
+  if (pipelineName === 'fnb' || pipelineName.toLowerCase().includes('food') || pipelineName.toLowerCase().includes('beverage')) {
+    return [
+      { id: 'lead', name: 'Lead', color: 'stage-purple', order: 0 },
+      { id: 'trial', name: 'Trial', color: 'stage-called', order: 1 },
+      { id: 'onboard', name: 'Onboard', color: 'stage-onboard', order: 2 },
+      { id: 'live', name: 'Live', color: 'stage-live', order: 3 },
+      { id: 'churn', name: 'Churn', color: 'stage-pink', order: 4 },
+    ];
+  }
+  return [
+  { id: 'new', name: 'New', color: 'stage-new', order: 0 },
+  { id: 'called', name: 'Called', color: 'stage-called', order: 1 },
+  { id: 'onboard', name: 'Onboard', color: 'stage-onboard', order: 2 },
+  { id: 'live', name: 'Live', color: 'stage-live', order: 3 },
+  { id: 'lost', name: 'Lost', color: 'stage-lost', order: 4 },
+];
+};
+
+// Legacy exports for backward compatibility (deprecated)
+export const stages: Stage[] = [];
+export const teamMembers: TeamMember[] = [];
+export const mockCards: Record<string, LeadCard> = {};
+export const lanes: Lane[] = [];

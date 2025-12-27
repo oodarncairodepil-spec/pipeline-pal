@@ -57,9 +57,34 @@ export function CardDetailPanel({
   const [tagInput, setTagInput] = useState('');
   const [clientNameOpen, setClientNameOpen] = useState(false);
   const [clientNameSearch, setClientNameSearch] = useState('');
-  const allTags = getTags();
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [activityPhases, setActivityPhases] = useState<string[]>([]);
+  const [subscriptionTiers, setSubscriptionTiers] = useState<string[]>([]);
+
+  // Load tags, activity phases, and subscription tiers
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [tags, phases, tiers] = await Promise.all([
+          getTags(),
+          getPipelineActivityPhases(pipelineId),
+          getSubscriptionTiers(),
+        ]);
+        setAllTags(tags);
+        setActivityPhases(phases);
+        setSubscriptionTiers(tiers);
+      } catch (error) {
+        console.error('Error loading tags/phases/tiers:', error);
+        // Set defaults
+        setAllTags(['VIP', 'Priority', 'Coffee', 'Ecommerce']);
+        setActivityPhases([]);
+        setSubscriptionTiers(['Basic', 'Pro', 'Enterprise']);
+      }
+    };
+    loadData();
+  }, [pipelineId]);
+
   const tagSuggestions = allTags.filter(t => t.toLowerCase().includes(tagInput.toLowerCase())).filter(t => !(card.tags || []).includes(t)).slice(0, 5);
-  const activityPhases = getPipelineActivityPhases(pipelineId);
   const [dealInput, setDealInput] = useState<string>(() => (card.dealValue ?? 0).toLocaleString());
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -330,18 +355,22 @@ export function CardDetailPanel({
               </div>
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground">Client name</label>
+              <div>
+                <label className="text-xs text-muted-foreground">
+                  Client name <span className="text-destructive">*</span>
+                </label>
                     <Popover open={clientNameOpen} onOpenChange={setClientNameOpen}>
                       <PopoverTrigger asChild>
                         <button
                           type="button"
                           className={cn(
-                            "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                            !card.clientName && "text-muted-foreground"
+                            "flex h-10 w-full items-center justify-between rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                            !card.clientName 
+                              ? "text-muted-foreground border-destructive focus:ring-destructive" 
+                              : "border-input"
                           )}
                         >
-                          {card.clientName || "Select or create client..."}
+                          {card.clientName || "Select or create client... *"}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </button>
                       </PopoverTrigger>
@@ -434,7 +463,7 @@ export function CardDetailPanel({
                         <SelectValue placeholder={card.subscriptionTier || 'Select tier'} />
                       </SelectTrigger>
                       <SelectContent>
-                        {getSubscriptionTiers().map(t => (
+                        {subscriptionTiers.map(t => (
                           <SelectItem key={t} value={t}>{t}</SelectItem>
                         ))}
                       </SelectContent>
@@ -461,7 +490,23 @@ export function CardDetailPanel({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground">Instagram</label>
-                    <Input value={card.instagram || ''} onChange={e => onUpdate(card.id, { instagram: e.target.value || undefined })} />
+                    <div className="flex items-center gap-1">
+                      <Input value={card.instagram || ''} onChange={e => onUpdate(card.id, { instagram: e.target.value || undefined })} />
+                      {card.instagram && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const url = card.instagram?.startsWith('http') ? card.instagram : `https://www.instagram.com/${card.instagram.replace(/^@/, '')}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                          title="Open Instagram link"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Instagram followers</label>
@@ -471,7 +516,23 @@ export function CardDetailPanel({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground">TikTok</label>
-                    <Input value={card.tiktok || ''} onChange={e => onUpdate(card.id, { tiktok: e.target.value || undefined })} />
+                    <div className="flex items-center gap-1">
+                      <Input value={card.tiktok || ''} onChange={e => onUpdate(card.id, { tiktok: e.target.value || undefined })} />
+                      {card.tiktok && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const url = card.tiktok?.startsWith('http') ? card.tiktok : `https://www.tiktok.com/${card.tiktok.startsWith('@') ? card.tiktok : `@${card.tiktok}`}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                          title="Open TikTok link"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">TikTok followers</label>
@@ -481,7 +542,23 @@ export function CardDetailPanel({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground">Tokopedia</label>
-                    <Input value={card.tokopedia || ''} onChange={e => onUpdate(card.id, { tokopedia: e.target.value || undefined })} />
+                    <div className="flex items-center gap-1">
+                      <Input value={card.tokopedia || ''} onChange={e => onUpdate(card.id, { tokopedia: e.target.value || undefined })} />
+                      {card.tokopedia && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const url = card.tokopedia?.startsWith('http') ? card.tokopedia : `https://www.tokopedia.com/${card.tokopedia}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                          title="Open Tokopedia link"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Tokopedia followers</label>
@@ -491,7 +568,23 @@ export function CardDetailPanel({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs text-muted-foreground">Shopee</label>
-                    <Input value={card.shopee || ''} onChange={e => onUpdate(card.id, { shopee: e.target.value || undefined })} />
+                    <div className="flex items-center gap-1">
+                      <Input value={card.shopee || ''} onChange={e => onUpdate(card.id, { shopee: e.target.value || undefined })} />
+                      {card.shopee && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const url = card.shopee?.startsWith('http') ? card.shopee : `https://shopee.co.id/${card.shopee}`;
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                          title="Open Shopee link"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Shopee followers</label>
@@ -645,7 +738,23 @@ export function CardDetailPanel({
                   })}
                 </div>
                 <div className="flex justify-end mt-2">
-                  <Button size="sm" onClick={() => (onSave ? onSave(card) : onClose())}>Save</Button>
+                  <Button 
+                    size="sm" 
+                    onClick={() => {
+                      if (!card.clientName || !card.clientName.trim()) {
+                        // Show error or prevent save
+                        return;
+                      }
+                      if (onSave) {
+                        onSave(card);
+                      } else {
+                        onClose();
+                      }
+                    }}
+                    disabled={!card.clientName || !card.clientName.trim()}
+                  >
+                    Save
+                  </Button>
                 </div>
               </div>
             </div>
@@ -696,8 +805,11 @@ export function CardDetailPanel({
                       const exists = (card.tags || []).includes(name);
                       const next = exists ? (card.tags || []) : [ ...(card.tags || []), name ];
                       onUpdate(card.id, { tags: next });
-                      const global = getTags();
-                      if (!global.includes(name)) setTags([ ...global, name ]);
+                      if (!allTags.includes(name)) {
+                        const updatedTags = [...allTags, name];
+                        setAllTags(updatedTags);
+                        setTags(updatedTags).catch(console.error);
+                      }
                       setTagInput('');
                     }
                   }}

@@ -6,6 +6,7 @@ import { getRunningDays, formatRunningDays } from '@/lib/pipeline-utils';
 import { MemberAvatar } from './MemberAvatar';
 import { StageBadge } from './StageBadge';
 import { cn } from '@/lib/utils';
+import { useState, useEffect } from 'react';
 
 interface KanbanCardProps {
   card: LeadCard;
@@ -20,7 +21,27 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
   const runningDays = getRunningDays(card.startDate);
   const isAssigned = currentUser && card.assignedTo && card.assignedTo.id === currentUser.id;
   const isWatcher = currentUser && Array.isArray(card.watchers) && card.watchers.includes(currentUser.id);
-  const notifCount = currentUser ? getNotificationsForUser(currentUser.id).filter(n => n.cardId === card.id).length : 0;
+  const [notifCount, setNotifCount] = useState(0);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setNotifCount(0);
+      return;
+    }
+
+    const loadNotifications = async () => {
+      try {
+        const notifications = await getNotificationsForUser(currentUser.id);
+        const count = notifications.filter(n => n.cardId === card.id).length;
+        setNotifCount(count);
+      } catch (error) {
+        console.error('Error loading notifications:', error);
+        setNotifCount(0);
+      }
+    };
+
+    loadNotifications();
+  }, [currentUser?.id, card.id]);
   const formatFollowers = (n?: number) => {
     if (!n || n <= 0) return undefined;
     if (n >= 1_000_000) {
@@ -32,6 +53,56 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
       return String(v).replace('.', ',') + 'k';
     }
     return n.toLocaleString();
+  };
+
+  const extractHandle = (url: string, platform: 'instagram' | 'tiktok' | 'tokopedia' | 'shopee'): string => {
+    if (!url) return url;
+    
+    try {
+      // If it's already a handle (starts with @ or doesn't contain http), return as is
+      if (url.startsWith('@') || !url.includes('http')) {
+        return url;
+      }
+
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+
+      switch (platform) {
+        case 'tiktok':
+          // TikTok: https://www.tiktok.com/@username -> @username
+          const tiktokMatch = pathname.match(/^\/@([^\/]+)/);
+          if (tiktokMatch) {
+            return `@${tiktokMatch[1]}`;
+          }
+          break;
+        case 'instagram':
+          // Instagram: https://www.instagram.com/username/ -> username
+          const instagramMatch = pathname.match(/^\/([^\/]+)/);
+          if (instagramMatch) {
+            return instagramMatch[1];
+          }
+          break;
+        case 'tokopedia':
+          // Tokopedia: https://www.tokopedia.com/storename -> storename
+          const tokopediaMatch = pathname.match(/^\/([^\/]+)/);
+          if (tokopediaMatch) {
+            return tokopediaMatch[1];
+          }
+          break;
+        case 'shopee':
+          // Shopee: https://shopee.co.id/storename -> storename
+          const shopeeMatch = pathname.match(/^\/([^\/]+)/);
+          if (shopeeMatch) {
+            return shopeeMatch[1];
+          }
+          break;
+      }
+    } catch (e) {
+      // If URL parsing fails, return original
+    }
+    
+    // Fallback: return original value
+    return url;
   };
 
   return (
@@ -83,25 +154,25 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
             {card.instagram && (
               <span className="flex items-center gap-1">
                 <Instagram className="w-3 h-3" />
-                {card.instagram} {card.instagramFollowers ? `(${formatFollowers(card.instagramFollowers)})` : ''}
+                {extractHandle(card.instagram, 'instagram')} {card.instagramFollowers ? `(${formatFollowers(card.instagramFollowers)})` : ''}
               </span>
             )}
             {card.tiktok && (
               <span className="flex items-center gap-1">
                 <img src="https://cdn.simpleicons.org/tiktok" alt="TikTok" className="w-3 h-3" />
-                {card.tiktok} {card.tiktokFollowers ? `(${formatFollowers(card.tiktokFollowers)})` : ''}
+                {extractHandle(card.tiktok, 'tiktok')} {card.tiktokFollowers ? `(${formatFollowers(card.tiktokFollowers)})` : ''}
               </span>
             )}
             {card.tokopedia && (
               <span className="flex items-center gap-1">
                 <img src="https://www.tokopedia.com/favicon.ico" alt="Tokopedia" className="w-3 h-3" />
-                {card.tokopedia} {card.tokopediaFollowers ? `(${formatFollowers(card.tokopediaFollowers)})` : ''}
+                {extractHandle(card.tokopedia, 'tokopedia')} {card.tokopediaFollowers ? `(${formatFollowers(card.tokopediaFollowers)})` : ''}
               </span>
             )}
             {card.shopee && (
               <span className="flex items-center gap-1">
                 <img src="https://cdn.simpleicons.org/shopee" alt="Shopee" className="w-3 h-3" />
-                {card.shopee} {card.shopeeFollowers ? `(${formatFollowers(card.shopeeFollowers)})` : ''}
+                {extractHandle(card.shopee, 'shopee')} {card.shopeeFollowers ? `(${formatFollowers(card.shopeeFollowers)})` : ''}
               </span>
             )}
             

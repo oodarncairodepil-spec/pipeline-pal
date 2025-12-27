@@ -6,6 +6,7 @@ import { getCurrentUser, setCurrentUser } from '@/lib/settings';
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '@/components/AppHeader';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ export default function Profile() {
   const [avatar, setAvatar] = useState(initial.avatar || '');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [showAvatarSelection, setShowAvatarSelection] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const presets = ['Alex','Jamie','Taylor','Rina','Budi','Ava','Sam'];
@@ -28,7 +30,23 @@ export default function Profile() {
         <div className="flex items-center gap-4">
           <MemberAvatar member={{ id: initial.id, name, avatar, role: 'manager', email }} size="md" />
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => fileRef.current?.click()}>Upload</Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">Upload</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => {
+                  setShowAvatarSelection(true);
+                }}>
+                  Select from existing avatar
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  fileRef.current?.click();
+                }}>
+                  Upload your own image
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
               const file = e.target.files?.[0];
               if (!file) return;
@@ -47,16 +65,21 @@ export default function Profile() {
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
         </div>
-        <div>
-          <label className="text-xs text-muted-foreground">Select avatar</label>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {presets.map(seed => (
-              <button key={seed} className="rounded-md border p-1" onClick={() => setAvatar(avatarUrl(seed))}>
-                <img src={avatarUrl(seed)} className="w-12 h-12 rounded-md" />
-              </button>
-            ))}
+        {showAvatarSelection && (
+          <div>
+            <label className="text-xs text-muted-foreground">Select avatar</label>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {presets.map(seed => (
+                <button key={seed} className="rounded-md border p-1" onClick={() => {
+                  setAvatar(avatarUrl(seed));
+                  setShowAvatarSelection(false);
+                }}>
+                  <img src={avatarUrl(seed)} className="w-12 h-12 rounded-md" />
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-muted-foreground">Current password</label>

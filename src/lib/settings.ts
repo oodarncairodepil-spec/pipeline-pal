@@ -1,290 +1,411 @@
-export const getSubscriptionTierObjects = (): { name: string; active: boolean }[] => {
+// Re-export types
+export interface PipelineRef { id: number; name: string }
+export interface UserNotification { id: string; cardId: string; clientName: string; note: string; timestamp: string; pipelineId: string; read?: boolean }
+
+// Import Supabase data access functions
+import * as dbPipelines from './db/pipelines';
+import * as dbStages from './db/stages';
+import * as dbUsers from './db/users';
+import * as dbNotifications from './db/notifications';
+import * as dbSettings from './db/settings';
+import { getCurrentAuthUser } from './auth';
+import { TeamMember } from '@/types/pipeline';
+
+// Subscription Tiers - now async
+export const getSubscriptionTierObjects = async (): Promise<{ name: string; active: boolean }[]> => {
   try {
-    const raw = localStorage.getItem('subscriptionTiers');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      const normalized: { name: string; active: boolean }[] = parsed
-        .map((x: any) => {
-          if (typeof x === 'string') return { name: x, active: true };
-          if (x && typeof x.name === 'string') return { name: x.name, active: Boolean(x.active) };
-          return null;
-        })
-        .filter((v: any) => v && v.name.trim().length > 0);
-      // Deduplicate by name
-      const seen = new Set<string>();
-      const dedup = normalized.filter((t) => {
-        const key = t.name.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      if (dedup.length > 0) return dedup;
-    }
-  } catch {}
+    return await dbSettings.getSubscriptionTierObjects();
+  } catch (error) {
+    console.error('Error fetching subscription tiers:', error);
   return [
     { name: 'Basic', active: true },
     { name: 'Pro', active: true },
     { name: 'Enterprise', active: true },
   ];
+  }
 };
 
-export const setSubscriptionTierObjects = (tiers: { name: string; active: boolean }[]) => {
-  try {
-    localStorage.setItem('subscriptionTiers', JSON.stringify(tiers));
-  } catch {}
+export const setSubscriptionTierObjects = async (tiers: { name: string; active: boolean }[]): Promise<void> => {
+  await dbSettings.setSubscriptionTierObjects(tiers);
 };
 
-export const getSubscriptionTiers = (): string[] => {
-  return getSubscriptionTierObjects()
-    .filter((t) => t.active)
-    .map((t) => t.name);
+export const getSubscriptionTiers = async (): Promise<string[]> => {
+  return await dbSettings.getSubscriptionTiers();
 };
 
-export const setSubscriptionTiers = (tiers: string[]) => {
-  try {
+export const setSubscriptionTiers = async (tiers: string[]): Promise<void> => {
     const objs = Array.isArray(tiers)
       ? tiers.filter((n) => typeof n === 'string' && n.trim().length > 0).map((n) => ({ name: n, active: true }))
       : [];
-    localStorage.setItem('subscriptionTiers', JSON.stringify(objs));
-  } catch {}
+  await setSubscriptionTierObjects(objs);
 };
 
-export const getTeamMembersOverrides = () => {
+// Team Members - now uses pipeline_members
+export const getTeamMembersOverrides = async (pipelineId: string) => {
   try {
-    const raw = localStorage.getItem('teamMembers');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
-  return [
-    {
-      id: 'invite-1',
-      name: 'Rina',
-      email: 'rina@example.com',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Rina&backgroundColor=b6e3f4',
-      role: 'staff',
-      invitationStatus: 'sent',
-      invitationSentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 'invite-2',
-      name: 'Budi',
-      email: 'budi@example.com',
-      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Budi&backgroundColor=c0aede',
-      role: 'manager',
-      invitationStatus: 'sent',
-      invitationSentAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-  ];
+    const members = await dbUsers.getPipelineMembers(pipelineId);
+    // Filter to only pending/sent invitations
+    return members.filter((m: any) => 
+      m.invitationStatus === 'pending' || m.invitationStatus === 'sent'
+    );
+  } catch (error) {
+    console.error('Error fetching team members:', error);
+    return [];
+  }
 };
 
-export const setTeamMembersOverrides = (members: any[]) => {
-  try {
-    localStorage.setItem('teamMembers', JSON.stringify(members));
-  } catch {}
+export const setTeamMembersOverrides = async (pipelineId: string, members: any[]): Promise<void> => {
+  // This function is used for managing pipeline members
+  // Members are managed through pipeline_members table
+  // This is a no-op as members are managed via addPipelineMember/updatePipelineMember
 };
 
-export const getStagesOverrides = () => {
+// Stages - now uses pipeline_stages
+export const getStagesOverrides = async (pipelineId: string) => {
   try {
-    const raw = localStorage.getItem('stages');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
+    return await dbStages.getPipelineStages(pipelineId);
+  } catch (error) {
+    console.error('Error fetching stages:', error);
   return [];
+  }
 };
 
-export const setStagesOverrides = (stages: any[]) => {
-  try {
-    localStorage.setItem('stages', JSON.stringify(stages));
-  } catch {}
+export const setStagesOverrides = async (pipelineId: string, stages: any[]): Promise<void> => {
+  // Stages are managed through pipeline_stages table
+  // This function is kept for compatibility but stages should be managed via db/stages.ts
 };
 
-export const getTags = (): string[] => {
+// Tags - now async
+export const getTags = async (): Promise<string[]> => {
   try {
-    const raw = localStorage.getItem('tags');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      const normalized = parsed
-        .map((x: any) => (typeof x === 'string' ? x : ''))
-        .filter((v: any) => typeof v === 'string' && v.trim().length > 0);
-      if (normalized.length > 0) return normalized as string[];
-    }
-  } catch {}
-  return ['VIP','Priority','Coffee','Ecommerce'];
+    return await dbSettings.getTags();
+  } catch (error) {
+    console.error('Error fetching tags:', error);
+    return ['VIP', 'Priority', 'Coffee', 'Ecommerce'];
+  }
 };
 
-export const setTags = (tags: string[]) => {
-  try {
-    const list = Array.from(new Set(tags.filter(t => typeof t === 'string' && t.trim().length > 0)));
-    localStorage.setItem('tags', JSON.stringify(list));
-  } catch {}
+export const setTags = async (tags: string[]): Promise<void> => {
+  await dbSettings.setTags(tags);
 };
 
-export const getActivityPhases = (): string[] => {
+// Activity Phases - now async
+export const getActivityPhases = async (pipelineId: string): Promise<string[]> => {
   try {
-    const raw = localStorage.getItem('activityPhases');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      const normalized = parsed
-        .map((x: any) => (typeof x === 'string' ? x : ''))
-        .filter((v: any) => typeof v === 'string' && v.trim().length > 0);
-      if (normalized.length > 0) return normalized as string[];
-    }
-  } catch {}
-  return ['Activity One', 'Activity Two'];
+    return await dbSettings.getPipelineActivityPhases(pipelineId);
+  } catch (error) {
+    console.error('Error fetching activity phases:', error);
+    return getDefaultPhasesForPipeline(pipelineId);
+  }
 };
 
-export const setActivityPhases = (phases: string[]) => {
-  try {
-    const list = Array.from(new Set(phases.filter(p => typeof p === 'string' && p.trim().length > 0)));
-    localStorage.setItem('activityPhases', JSON.stringify(list));
-  } catch {}
+export const setActivityPhases = async (pipelineId: string, phases: string[]): Promise<void> => {
+  await dbSettings.setPipelineActivityPhases(pipelineId, phases);
 };
 
-// Pipelines registry
-export interface PipelineRef { id: string; name: string }
-export interface UserNotification { id: string; cardId: string; clientName: string; note: string; timestamp: string; pipelineId: string; read?: boolean }
-
-export const getPipelines = (): PipelineRef[] => {
+// Pipelines - now async
+export const getPipelines = async (): Promise<PipelineRef[]> => {
   try {
-    const raw = localStorage.getItem('pipelines');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const normalized = parsed
-        .map((x: any) => (x && typeof x.id === 'string' && typeof x.name === 'string' ? x : null))
-        .filter(Boolean) as PipelineRef[];
-      if (normalized.length > 0) {
-        const ensure: PipelineRef[] = [{ id: 'default', name: 'Default' }, { id: 'retail', name: 'Retail' }, { id: 'fnb', name: 'Food & Beverage' }];
-        const ids = new Set(normalized.map(p => p.id));
-        const merged = [...normalized];
-        ensure.forEach(p => { if (!ids.has(p.id)) merged.push(p); });
-        try { localStorage.setItem('pipelines', JSON.stringify(merged)); } catch {}
-        return merged;
+    const pipelines = await dbPipelines.getPipelines();
+    
+    // Return pipelines from database (no auto-creation of default pipelines)
+    // Users should create pipelines manually through the UI
+    return pipelines;
+  } catch (error) {
+    console.error('Error fetching pipelines:', error);
+    // Return empty array on error instead of default pipelines
+    return [];
+  }
+};
+
+export const setPipelines = async (pipelines: PipelineRef[]): Promise<void> => {
+  // Pipelines are managed through pipelines table
+  // This function is kept for compatibility but pipelines should be managed via db/pipelines.ts
+};
+
+// Pipeline-scoped helpers - now async
+// Helper to convert pipeline name (slug) to numeric ID
+const getPipelineIdFromName = async (pipelineNameOrId: string | number): Promise<number> => {
+  // If it's already a number, return it
+  if (typeof pipelineNameOrId === 'number') return pipelineNameOrId;
+  
+  // Try to parse as number first (for backward compatibility)
+  const numId = Number(pipelineNameOrId);
+  if (!isNaN(numId) && numId > 0) return numId;
+  
+  // Otherwise, treat as name and look it up
+  const { getPipelineIdByName } = await import('./db/pipelines');
+  const id = await getPipelineIdByName(pipelineNameOrId);
+  if (!id) throw new Error(`Pipeline not found: ${pipelineNameOrId}`);
+  return id;
+};
+
+export const getPipelineStages = async (pipelineId: string | number) => {
+  try {
+    const numericId = await getPipelineIdFromName(pipelineId);
+    const stages = await dbStages.getPipelineStages(numericId.toString());
+    if (stages.length > 0) return stages;
+    // Return defaults if no stages found
+    return getDefaultStagesForPipeline(numericId.toString());
+  } catch (error) {
+    console.error('Error fetching pipeline stages:', error);
+    const numericId = typeof pipelineId === 'number' ? pipelineId : await getPipelineIdFromName(pipelineId).catch(() => 0);
+    return getDefaultStagesForPipeline(numericId.toString());
+  }
+};
+
+export const setPipelineStages = async (pipelineId: string | number, stages: any[]): Promise<void> => {
+  // Sync stages with Supabase
+  const { getPipelineStages, createPipelineStage, updatePipelineStage, deletePipelineStage } = await import('./db/stages');
+  
+  try {
+    const numericId = await getPipelineIdFromName(pipelineId);
+    const numericIdStr = numericId.toString();
+    
+    // Get existing stages
+    const existingStages = await getPipelineStages(numericIdStr);
+    const existingIds = new Set(existingStages.map(s => s.id));
+    const newIds = new Set(stages.map(s => s.id));
+    
+    // Delete stages that are no longer in the list
+    for (const existing of existingStages) {
+      if (!newIds.has(existing.id)) {
+        try {
+          await deletePipelineStage(numericIdStr, existing.id);
+        } catch (error) {
+          // Log but don't throw - continue with other operations
+          console.warn(`Error deleting stage ${existing.id}:`, error);
+        }
       }
     }
-  } catch {}
-  const defaults = [
-    { id: 'default', name: 'Default' },
-    { id: 'retail', name: 'Retail' },
-    { id: 'fnb', name: 'Food & Beverage' },
-  ];
-  try { localStorage.setItem('pipelines', JSON.stringify(defaults)); } catch {}
-  return defaults;
+    
+    // Create or update stages
+    for (const stage of stages) {
+      try {
+        if (existingIds.has(stage.id)) {
+          // Update existing stage
+          await updatePipelineStage(numericIdStr, stage.id, {
+            name: stage.name,
+            color: stage.color,
+            order: stage.order || 0,
+          });
+        } else {
+          // Create new stage
+          await createPipelineStage(numericIdStr, {
+            id: stage.id,
+            name: stage.name,
+            color: stage.color || 'stage-new',
+            order: stage.order || 0,
+          });
+        }
+      } catch (error) {
+        // Log but don't throw - continue with other operations
+        console.warn(`Error syncing stage ${stage.id}:`, error);
+      }
+    }
+  } catch (error) {
+    // Only log error, don't throw - allow other operations to continue
+    console.error('Error syncing pipeline stages:', error);
+  }
 };
 
-export const setPipelines = (pipelines: PipelineRef[]) => {
+export const getPipelineMembers = async (pipelineId: string | number): Promise<TeamMember[]> => {
   try {
-    const list = Array.from(new Set(pipelines.map(p => p.id))).length === pipelines.length
-      ? pipelines
-      : pipelines.reduce((acc: PipelineRef[], p) => (acc.find(x => x.id === p.id) ? acc : acc.concat(p)), []);
-    localStorage.setItem('pipelines', JSON.stringify(list));
-  } catch {}
-};
-
-// Pipeline-scoped helpers
-const k = (id: string, key: string) => `pipeline:${id}:${key}`;
-
-export const getPipelineStages = (pipelineId: string) => {
-  try {
-    const raw = localStorage.getItem(k(pipelineId, 'stages'));
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
-  const defaults = getDefaultStagesForPipeline(pipelineId);
-  return defaults;
-};
-
-export const setPipelineStages = (pipelineId: string, stages: any[]) => {
-  try { localStorage.setItem(k(pipelineId, 'stages'), JSON.stringify(stages)); } catch {}
-};
-
-export const getPipelineMembers = (pipelineId: string) => {
-  try {
-    const raw = localStorage.getItem(k(pipelineId, 'members'));
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
+    const numericId = await getPipelineIdFromName(pipelineId);
+    return await dbUsers.getPipelineMembers(numericId.toString());
+  } catch (error) {
+    console.error('Error fetching pipeline members:', error);
   return [];
+  }
 };
 
-export const setPipelineMembers = (pipelineId: string, members: any[]) => {
-  try { localStorage.setItem(k(pipelineId, 'members'), JSON.stringify(members)); } catch {}
-};
-
-export const getPipelineActivityPhases = (pipelineId: string): string[] => {
+export const setPipelineMembers = async (pipelineId: string | number, members: any[]): Promise<void> => {
+  // Sync members with Supabase pipeline_members table
+  const { getPipelineMembers, addPipelineMember, updatePipelineMember, removePipelineMember } = await import('./db/users');
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:212',message:'setPipelineMembers entry',data:{pipelineId:pipelineId,membersLength:members.length,members:members.map(m=>({id:m.id,name:m.name,role:m.role}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
+  
   try {
-    const raw = localStorage.getItem(k(pipelineId, 'phases'));
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      const normalized = parsed
-        .map((x: any) => (typeof x === 'string' ? x : ''))
-        .filter((v: any) => typeof v === 'string' && v.trim().length > 0);
-      if (normalized.length > 0) return normalized as string[];
+    const numericId = await getPipelineIdFromName(pipelineId);
+    const numericIdStr = numericId.toString();
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:220',message:'setPipelineMembers got numericId',data:{numericId:numericId,numericIdStr:numericIdStr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
+    // Get existing members
+    const existingMembers = await getPipelineMembers(numericIdStr);
+    const existingUserIds = new Set(existingMembers.map(m => m.id));
+    const newUserIds = new Set(members.map(m => m.id));
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:227',message:'setPipelineMembers existing members',data:{existingCount:existingMembers.length,existingIds:Array.from(existingUserIds),newIds:Array.from(newUserIds)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
+    // Remove members that are no longer in the list
+    for (const existing of existingMembers) {
+      if (!newUserIds.has(existing.id)) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:232',message:'setPipelineMembers removing member',data:{userId:existing.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        await removePipelineMember(numericIdStr, existing.id);
+      }
     }
-  } catch {}
-  return getDefaultPhasesForPipeline(pipelineId);
+    
+    // Add or update members
+    for (const member of members) {
+      if (existingUserIds.has(member.id)) {
+        // Update existing member (role might have changed)
+        const existing = existingMembers.find(m => m.id === member.id);
+        if (existing && existing.role !== member.role) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:242',message:'setPipelineMembers updating member',data:{userId:member.id,oldRole:existing.role,newRole:member.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+          // #endregion
+          await updatePipelineMember(numericIdStr, member.id, {
+            role: member.role as 'manager' | 'staff',
+            invitation_status: 'accepted', // Ensure they're accepted
+          });
+        }
+      } else {
+        // Add new member
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:251',message:'setPipelineMembers adding member',data:{userId:member.id,role:member.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+        await addPipelineMember(numericIdStr, member.id, member.role as 'manager' | 'staff', 'accepted');
+      }
+    }
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:257',message:'setPipelineMembers success',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+  } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:261',message:'setPipelineMembers error',data:{error:error instanceof Error ? error.message : String(error),errorCode:(error as any)?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    console.error('Error syncing pipeline members:', error);
+    throw error;
+  }
 };
 
-export const setPipelineActivityPhases = (pipelineId: string, phases: string[]) => {
+export const getPipelineActivityPhases = async (pipelineId: string | number): Promise<string[]> => {
   try {
-    const list = Array.from(new Set(phases.filter(p => typeof p === 'string' && p.trim().length > 0)));
-    localStorage.setItem(k(pipelineId, 'phases'), JSON.stringify(list));
-  } catch {}
+    const numericId = await getPipelineIdFromName(pipelineId);
+    return await dbSettings.getPipelineActivityPhases(numericId.toString());
+  } catch (error) {
+    console.error('Error fetching pipeline activity phases:', error);
+    const numericId = typeof pipelineId === 'number' ? pipelineId : await getPipelineIdFromName(pipelineId).catch(() => 0);
+    return getDefaultPhasesForPipeline(numericId.toString());
+  }
 };
 
-export const getCurrentUser = () => {
+export const setPipelineActivityPhases = async (pipelineId: string | number, phases: string[]): Promise<void> => {
+  const numericId = await getPipelineIdFromName(pipelineId);
+  await dbSettings.setPipelineActivityPhases(numericId.toString(), phases);
+};
+
+// Current User - now async, uses Supabase Auth
+export const getCurrentUser = async (): Promise<TeamMember> => {
   try {
-    const raw = localStorage.getItem('currentUser');
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed.id === 'string') return parsed;
-  } catch {}
-  const fallback = { id: 'alex', name: 'Alex', email: 'alex@example.com', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4', role: 'manager' };
-  try { localStorage.setItem('currentUser', JSON.stringify(fallback)); } catch {}
+    const authUser = await getCurrentAuthUser();
+    if (!authUser) {
+      // Return fallback user for development/unauthenticated state
+      const fallback: TeamMember = {
+        id: 'alex',
+        name: 'Alex',
+        email: 'alex@example.com',
+        avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4',
+        role: 'manager',
+      };
+      return fallback;
+    }
+    
+    let user = await dbUsers.getUser(authUser.id);
+    if (!user) {
+      // Create user profile if it doesn't exist using upsert
+      const { getSupabaseClient } = await import('./supabase');
+      const supabase = getSupabaseClient();
+      const fallback: TeamMember = {
+        id: authUser.id,
+        name: authUser.email?.split('@')[0] || 'User',
+        email: authUser.email,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(authUser.email || 'User')}&backgroundColor=b6e3f4`,
+        role: 'staff',
+      };
+      // Try to create user profile using upsert
+      try {
+        const { error: upsertError } = await supabase
+          .from('users')
+          .upsert({
+            id: authUser.id,
+            name: fallback.name,
+            email: fallback.email,
+            avatar: fallback.avatar,
+            role: fallback.role,
+          }, { onConflict: 'id' });
+        if (!upsertError) {
+          // Try to fetch again after creation
+          user = await dbUsers.getUser(authUser.id);
+        }
+      } catch (err) {
+        console.warn('Error creating user profile:', err);
+      }
+      return user || fallback;
+    }
+    return user;
+  } catch (error) {
+    console.error('Error fetching current user:', error);
+    // Fallback for development
+    const fallback: TeamMember = {
+      id: 'alex',
+      name: 'Alex',
+      email: 'alex@example.com',
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4',
+      role: 'manager',
+    };
   return fallback;
+  }
 };
 
-export const setCurrentUser = (user: any) => {
-  try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch {}
+export const setCurrentUser = async (user: Partial<TeamMember>): Promise<void> => {
+  if (!user.id) throw new Error('User ID is required');
+  await dbUsers.updateUser(user.id, {
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    role: user.role,
+  });
 };
 
-export const getNotificationsForUser = (userId: string): UserNotification[] => {
+// Notifications - now async
+export const getNotificationsForUser = async (userId: string): Promise<UserNotification[]> => {
   try {
-    const raw = localStorage.getItem(`notifications:${userId}`);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      // Ensure all notifications have a read property (default to false if missing)
-      const normalized = parsed.map(n => ({ ...n, read: n.read !== undefined ? n.read : false }));
-      return normalized;
-    }
-  } catch {}
-  const seed: UserNotification[] = [
-    { id: `n-${Date.now()}`, cardId: 'card-1', clientName: 'Bakery Aja', note: '@Alex please review', timestamp: new Date().toISOString(), pipelineId: 'default', read: false },
-  ];
-  try { localStorage.setItem(`notifications:${userId}`, JSON.stringify(seed)); } catch {}
-  return seed;
+    return await dbNotifications.getNotificationsForUser(userId);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    return [];
+  }
 };
 
-export const getUnreadNotificationCount = (userId: string): number => {
-  const notifications = getNotificationsForUser(userId);
-  return notifications.filter(n => !n.read).length;
-};
-
-export const markNotificationsAsRead = (userId: string) => {
+export const getUnreadNotificationCount = async (userId: string): Promise<number> => {
   try {
-    const notifications = getNotificationsForUser(userId);
-    const updated = notifications.map(n => ({ ...n, read: true }));
-    localStorage.setItem(`notifications:${userId}`, JSON.stringify(updated));
-  } catch {}
+    return await dbNotifications.getUnreadNotificationCount(userId);
+  } catch (error) {
+    console.error('Error counting unread notifications:', error);
+    return 0;
+  }
 };
 
-export const pushNotificationForUser = (userId: string, notification: UserNotification) => {
-  try {
-    const list = getNotificationsForUser(userId);
-    const notificationWithRead = { ...notification, read: false };
-    const next = [notificationWithRead, ...list].slice(0, 200);
-    localStorage.setItem(`notifications:${userId}`, JSON.stringify(next));
-  } catch {}
+export const markNotificationsAsRead = async (userId: string): Promise<void> => {
+  await dbNotifications.markNotificationsAsRead(userId);
 };
 
+export const pushNotificationForUser = async (userId: string, notification: UserNotification): Promise<void> => {
+  await dbNotifications.pushNotificationForUser(userId, notification);
+};
+
+// Default stages and phases helpers (synchronous, used for fallbacks)
 const getDefaultStagesForPipeline = (pipelineId: string) => {
   if (pipelineId === 'retail') {
     return [

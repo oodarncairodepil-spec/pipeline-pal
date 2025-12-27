@@ -1,36 +1,57 @@
+import { getSupabaseClient } from './supabase';
+
+// Legacy function for backward compatibility - now uses Supabase Auth
 export const getSupabaseConfig = () => {
-  const url = (import.meta as any).env?.VITE_SUPABASE_URL as string | undefined;
-  const anon = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined;
+  const url = import.meta.env.VITE_SUPABASE_URL || '';
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   return { url, anon };
 };
 
 export const loginWithSupabasePassword = async (email: string, password: string) => {
-  const { url, anon } = getSupabaseConfig();
-  if (!url || !anon) {
-    throw new Error('Missing Supabase environment configuration');
-  }
-  const endpoint = `${url.replace(/\/$/, '')}/auth/v1/token?grant_type=password`;
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': anon,
-    },
-    body: JSON.stringify({ email, password })
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password,
   });
-  if (!res.ok) {
-    let message = 'Login failed';
-    try {
-      const err = await res.json();
-      message = err.error_description || err.error || err.message || message;
-    } catch {
-      try { message = await res.text(); } catch {}
-    }
-    throw new Error(message);
+
+  if (error) {
+    throw new Error(error.message || 'Login failed');
   }
-  const data = await res.json();
-  try {
-    localStorage.setItem('sb:token', JSON.stringify(data));
-  } catch {}
+
+  // Store session info for backward compatibility
+  if (data.session) {
+    try {
+      localStorage.setItem('sb:token', JSON.stringify({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+        user: data.user,
+      }));
+    } catch {}
+  }
+
   return data;
+};
+
+export const signOut = async () => {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+  
+  // Clear legacy token
+  try {
+    localStorage.removeItem('sb:token');
+  } catch {}
+};
+
+export const getCurrentSession = async () => {
+  const supabase = getSupabaseClient();
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return session;
+};
+
+export const getCurrentAuthUser = async () => {
+  const session = await getCurrentSession();
+  return session?.user ?? null;
 };
