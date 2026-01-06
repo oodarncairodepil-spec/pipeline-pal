@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Instagram, Calendar, Phone, Globe, User, FileText, Upload,
-  Clock, ArrowRight, MessageSquare, Paperclip, ExternalLink
+  Clock, ArrowRight, MessageSquare, Paperclip, ExternalLink, Trash2
 } from 'lucide-react';
 import { LeadCard, Stage, TeamMember, StageId, FileAttachment } from '@/types/pipeline';
 import { getRunningDays, formatRunningDays, formatFollowers, formatFileSize, getStageColorClasses } from '@/lib/pipeline-utils';
@@ -32,6 +32,7 @@ interface CardDetailPanelProps {
   onClose: () => void;
   onUpdate: (cardId: string, updates: Partial<LeadCard>) => void;
   onSave?: (card: LeadCard) => void;
+  onDelete?: (cardId: string) => void;
   isDraft?: boolean;
   sectionsByStage?: Record<string, { id: string; name: string; color: string }[]>;
   existingClientNames?: string[];
@@ -45,6 +46,7 @@ export function CardDetailPanel({
   onClose,
   onUpdate,
   onSave,
+  onDelete,
   isDraft = false,
   sectionsByStage,
   existingClientNames = [],
@@ -60,6 +62,7 @@ export function CardDetailPanel({
   const [allTags, setAllTags] = useState<string[]>([]);
   const [activityPhases, setActivityPhases] = useState<string[]>([]);
   const [subscriptionTiers, setSubscriptionTiers] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   // Load tags, activity phases, and subscription tiers
   useEffect(() => {
@@ -355,7 +358,7 @@ export function CardDetailPanel({
               </div>
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-2">
-              <div>
+                  <div>
                 <label className="text-xs text-muted-foreground">
                   Client name <span className="text-destructive">*</span>
                 </label>
@@ -491,7 +494,7 @@ export function CardDetailPanel({
                   <div>
                     <label className="text-xs text-muted-foreground">Instagram</label>
                     <div className="flex items-center gap-1">
-                      <Input value={card.instagram || ''} onChange={e => onUpdate(card.id, { instagram: e.target.value || undefined })} />
+                    <Input value={card.instagram || ''} onChange={e => onUpdate(card.id, { instagram: e.target.value || undefined })} />
                       {card.instagram && (
                         <button
                           onClick={(e) => {
@@ -517,7 +520,7 @@ export function CardDetailPanel({
                   <div>
                     <label className="text-xs text-muted-foreground">TikTok</label>
                     <div className="flex items-center gap-1">
-                      <Input value={card.tiktok || ''} onChange={e => onUpdate(card.id, { tiktok: e.target.value || undefined })} />
+                    <Input value={card.tiktok || ''} onChange={e => onUpdate(card.id, { tiktok: e.target.value || undefined })} />
                       {card.tiktok && (
                         <button
                           onClick={(e) => {
@@ -543,7 +546,7 @@ export function CardDetailPanel({
                   <div>
                     <label className="text-xs text-muted-foreground">Tokopedia</label>
                     <div className="flex items-center gap-1">
-                      <Input value={card.tokopedia || ''} onChange={e => onUpdate(card.id, { tokopedia: e.target.value || undefined })} />
+                    <Input value={card.tokopedia || ''} onChange={e => onUpdate(card.id, { tokopedia: e.target.value || undefined })} />
                       {card.tokopedia && (
                         <button
                           onClick={(e) => {
@@ -569,7 +572,7 @@ export function CardDetailPanel({
                   <div>
                     <label className="text-xs text-muted-foreground">Shopee</label>
                     <div className="flex items-center gap-1">
-                      <Input value={card.shopee || ''} onChange={e => onUpdate(card.id, { shopee: e.target.value || undefined })} />
+                    <Input value={card.shopee || ''} onChange={e => onUpdate(card.id, { shopee: e.target.value || undefined })} />
                       {card.shopee && (
                         <button
                           onClick={(e) => {
@@ -737,25 +740,6 @@ export function CardDetailPanel({
                     );
                   })}
                 </div>
-                <div className="flex justify-end mt-2">
-                  <Button 
-                    size="sm" 
-                    onClick={() => {
-                      if (!card.clientName || !card.clientName.trim()) {
-                        // Show error or prevent save
-                        return;
-                      }
-                      if (onSave) {
-                        onSave(card);
-                      } else {
-                        onClose();
-                      }
-                    }}
-                    disabled={!card.clientName || !card.clientName.trim()}
-                  >
-                    Save
-                  </Button>
-                </div>
               </div>
             </div>
 
@@ -834,6 +818,38 @@ export function CardDetailPanel({
               </div>
             </div>
 
+            {/* Save Button and Delete Button */}
+            <div className="flex justify-between items-center">
+              {!isDraft && onDelete && (
+                <Button 
+                  variant="destructive"
+                  size="sm" 
+                  onClick={() => setDeleteConfirmOpen(true)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </Button>
+              )}
+              <div className={!isDraft && onDelete ? '' : 'ml-auto'}>
+                <Button 
+                  size="sm" 
+                  onClick={() => {
+                    if (!card.clientName || !card.clientName.trim()) {
+                      // Show error or prevent save
+                      return;
+                    }
+                    if (onSave) {
+                      onSave(card);
+                    } else {
+                      onClose();
+                    }
+                  }}
+                  disabled={!card.clientName || !card.clientName.trim()}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
 
             {/* Files */}
             {card.files.length > 0 && (
@@ -1035,6 +1051,35 @@ export function CardDetailPanel({
           </div>
         </div>
       </motion.div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Card</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete "{card.clientName}"? This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => {
+                if (onDelete) {
+                  onDelete(card.id);
+                  setDeleteConfirmOpen(false);
+                  onClose();
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AnimatePresence>
   );
 }

@@ -76,13 +76,13 @@ export function MemberAvatar({ member, size = 'md', showName = false, className 
       <Tooltip>
         <TooltipTrigger asChild>
           {hasCustomAvatar && !avatarError ? (
-            <img
+          <img
               src={member.avatar}
-              alt={member.name}
-              className={cn(
-                'rounded-full ring-2 ring-background shadow-sm object-cover',
-                sizeClasses[size]
-              )}
+            alt={member.name}
+            className={cn(
+              'rounded-full ring-2 ring-background shadow-sm object-cover',
+              sizeClasses[size]
+            )}
               onError={() => setAvatarError(true)}
             />
           ) : (

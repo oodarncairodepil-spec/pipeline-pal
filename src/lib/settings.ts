@@ -175,8 +175,8 @@ export const setPipelineStages = async (pipelineId: string | number, stages: any
         } catch (error) {
           // Log but don't throw - continue with other operations
           console.warn(`Error deleting stage ${existing.id}:`, error);
-        }
       }
+    }
     }
     
     // Create or update stages

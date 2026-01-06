@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { DragDropContext, DropResult } from '@hello-pangea/dnd';
+import { DragDropContext, DropResult, Draggable, Droppable } from '@hello-pangea/dnd';
 import { motion } from 'framer-motion';
 import { Search, Filter, Columns, Plus } from 'lucide-react';
 import { BoardState, LeadCard, StageId } from '@/types/pipeline';
@@ -57,9 +57,102 @@ export function KanbanBoard() {
   };
 
   const onDragEnd = useCallback(async (result: DropResult) => {
-    const { source, destination, draggableId } = result;
+    const { source, destination, draggableId, type } = result;
 
     if (!destination || !currentUser) return;
+
+    // Handle column (stage) reordering
+    if (type === 'COLUMN') {
+      if (source.index === destination.index) return;
+
+      const newLanes = Array.from(boardState.lanes);
+      const [removed] = newLanes.splice(source.index, 1);
+      newLanes.splice(destination.index, 0, removed);
+
+      // Update order for all stages
+      const updatedStages = newLanes.map((lane, index) => {
+        const stage = boardState.stages.find(s => s.id === lane.stage.id);
+        if (!stage) return lane.stage;
+        return { ...stage, order: index };
+      });
+
+      // Update local state
+      setBoardState(prev => ({
+        ...prev,
+        lanes: newLanes,
+        stages: updatedStages,
+      }));
+
+      // Save to Supabase
+      try {
+        const { getCurrentAuthUser } = await import('@/lib/auth');
+        const authUser = await getCurrentAuthUser();
+        if (authUser) {
+          const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+          if (numericId) {
+            // Update order for all stages
+            for (const stage of updatedStages) {
+              await dbStages.updatePipelineStage(numericId, stage.id, { order: stage.order });
+            }
+            console.log('✅ Column order updated in Supabase successfully');
+          }
+        }
+      } catch (error) {
+        console.error('Error updating column order in Supabase:', error);
+        // Continue even if Supabase update fails - local state is already updated
+      }
+      return;
+    }
+
+    // Handle section reordering within a stage
+    if (type === 'SECTION') {
+      if (source.index === destination.index) return;
+      
+      // Extract stageId from droppableId (format: "sections-{stageId}")
+      const stageId = source.droppableId.replace('sections-', '');
+      const lane = boardState.lanes.find(l => l.id === stageId);
+      if (!lane || !lane.sections) return;
+
+      const newSections = Array.from(lane.sections);
+      const [removed] = newSections.splice(source.index, 1);
+      newSections.splice(destination.index, 0, removed);
+
+      // Update local state
+      setBoardState(prev => ({
+        ...prev,
+        lanes: prev.lanes.map(l => 
+          l.id === stageId 
+            ? { ...l, sections: newSections }
+            : l
+        )
+      }));
+
+      // Save to Supabase
+      try {
+        const { getCurrentAuthUser } = await import('@/lib/auth');
+        const authUser = await getCurrentAuthUser();
+        if (authUser) {
+          const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+          if (numericId) {
+            const sectionOrders = newSections.map((s, index) => ({
+              sectionId: s.id,
+              order: index,
+            }));
+            // Update order for all sections
+            for (const { sectionId, order } of sectionOrders) {
+              await dbStages.updatePipelineSection(numericId, stageId, sectionId, { order });
+            }
+            console.log('✅ Section order updated in Supabase successfully');
+          }
+        }
+      } catch (error) {
+        console.error('Error updating section order in Supabase:', error);
+        // Continue even if Supabase update fails - local state is already updated
+      }
+      return;
+    }
+
+    // Handle card drag-and-drop (existing logic)
     const destinationId = destination.droppableId;
     const isSectionDrop = destinationId.startsWith('section:') || destinationId.startsWith('section-header:');
 
@@ -96,23 +189,52 @@ export function KanbanBoard() {
       const newStageId = destinationId as StageId;
       const newStageName = boardState.stages.find(s => s.id === newStageId)?.name || '';
       const stageChanged = card.stageId !== newStageId;
+      const updatedCard = {
+        ...card,
+        stageId: newStageId,
+        sectionId: undefined,
+        history: [
+          ...card.history,
+          ...(stageChanged ? [{
+            id: uid(),
+            type: 'stage_change' as const,
+            timestamp: new Date(),
+            user: currentUser,
+            details: { from: oldStageName, to: newStageName },
+          }] : []),
+        ],
+      };
+
+      // Update in Supabase
+      try {
+        const { getCurrentAuthUser } = await import('@/lib/auth');
+        const authUser = await getCurrentAuthUser();
+        if (authUser) {
+          // Get numeric pipeline ID
+          const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+          if (numericId) {
+            await dbCards.updateCard(draggableId, { stageId: newStageId, sectionId: undefined }, numericId);
+            
+            // Add history if stage changed
+            if (stageChanged && currentUser) {
+              await dbCards.addCardHistory(draggableId, {
+                id: uid(),
+                type: 'stage_change',
+                userId: currentUser.id,
+                details: { from: oldStageName, to: newStageName },
+                timestamp: new Date(),
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error updating card in Supabase:', error);
+        // Continue even if Supabase update fails - local state is already updated
+      }
+
       const updatedCards = {
         ...boardState.cards,
-        [draggableId]: {
-          ...card,
-          stageId: newStageId,
-          sectionId: undefined,
-          history: [
-            ...card.history,
-            ...(stageChanged ? [{
-              id: uid(),
-              type: 'stage_change' as const,
-              timestamp: new Date(),
-              user: currentUser,
-              details: { from: oldStageName, to: newStageName },
-            }] : []),
-          ],
-        },
+        [draggableId]: updatedCard,
       };
       setBoardState({ ...boardState, lanes: newLanes, cards: updatedCards });
       return;
@@ -204,6 +326,75 @@ export function KanbanBoard() {
     setBoardState({ ...boardState, lanes: newLanes, cards: updatedCards });
   }, [boardState, currentUser, pipelineId, pipelineIdNum]);
 
+  const deleteSection = useCallback(async (stageId: string, sectionId: string) => {
+    const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+    if (!numericId) {
+      console.error('Pipeline ID not found');
+      return;
+    }
+
+    // Find the lane and section
+    const lane = boardState.lanes.find(l => l.id === stageId);
+    const section = lane?.sections?.find(s => s.id === sectionId);
+    if (!section) {
+      console.error('Section not found');
+      return;
+    }
+
+    // Get cards in this section
+    const cardsInSection = Object.values(boardState.cards).filter(c => c.sectionId === sectionId);
+
+    // Update local state: remove section and move cards to unsectioned
+    setBoardState(prev => {
+      const updatedCards = { ...prev.cards };
+      // Move cards from section to unsectioned
+      cardsInSection.forEach(card => {
+        updatedCards[card.id] = {
+          ...card,
+          sectionId: undefined,
+        };
+      });
+
+      // Remove section from lane
+      const updatedLanes = prev.lanes.map(l => 
+        l.id === stageId 
+          ? { 
+              ...l, 
+              sections: (l.sections || []).filter(s => s.id !== sectionId)
+            } 
+          : l
+      );
+
+      return {
+        ...prev,
+        lanes: updatedLanes,
+        cards: updatedCards,
+      };
+    });
+
+    // Update cards in Supabase to remove sectionId
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        // Update all cards in this section to remove sectionId
+        for (const card of cardsInSection) {
+          await dbCards.updateCard(card.id, { sectionId: undefined }, numericId);
+        }
+
+        // Delete section from Supabase
+        await dbStages.deletePipelineSection(numericId, stageId, sectionId);
+        console.log('✅ Section deleted from Supabase successfully');
+      } else {
+        console.warn('User not authenticated, section deleted locally only');
+      }
+    } catch (error: any) {
+      console.error('❌ Error deleting section from Supabase:', error);
+      alert(`Error deleting section: ${error.message || 'Unknown error'}`);
+      // Section is already removed from local state
+    }
+  }, [boardState, pipelineId, pipelineIdNum]);
+
   const handleCardClick = useCallback((card: LeadCard) => {
     setSelectedCard(card);
   }, []);
@@ -294,6 +485,55 @@ export function KanbanBoard() {
       }
     })();
   }, [boardState.cards, currentUser, pipelineId, pipelineIdNum]);
+
+  const handleCardDelete = useCallback(async (cardId: string) => {
+    if (!currentUser) return;
+
+    // Remove card from state
+    setBoardState(prev => {
+      const newCards = { ...prev.cards };
+      delete newCards[cardId];
+
+      // Remove card from all lanes
+      const newLanes = prev.lanes.map(lane => {
+        const updatedCardIds = lane.cardIds.filter(id => id !== cardId);
+        const updatedSections = (lane.sections || []).map(section => ({
+          ...section,
+          cardIds: section.cardIds.filter(id => id !== cardId),
+        }));
+        return {
+          ...lane,
+          cardIds: updatedCardIds,
+          sections: updatedSections,
+        };
+      });
+
+      return {
+        ...prev,
+        cards: newCards,
+        lanes: newLanes,
+      };
+    });
+
+    // Close detail panel if this card is selected
+    setSelectedCard(prev => (prev?.id === cardId ? null : prev));
+
+    // Delete from Supabase (only if authenticated)
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        // Get numeric pipeline ID
+        const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
+        if (numericId) {
+          await dbCards.deleteCard(cardId, numericId);
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting card from Supabase:', error);
+      // Continue even if Supabase delete fails - local state is already updated
+    }
+  }, [currentUser, pipelineId, pipelineIdNum]);
 
   const handleAddCard = useCallback((stageId: string) => {
     const id = uid();
@@ -479,7 +719,52 @@ export function KanbanBoard() {
         } else {
           // Update existing card
           console.log('Updating existing card in Supabase...');
-          await dbCards.updateCard(card.id, cardWithHistory, numericId);
+          
+          // Only pass fields that have changed, not the entire card object
+          const existingCard = boardState.cards[card.id];
+          const updates: Partial<LeadCard> = {};
+          
+          // Check each field and only include if changed
+          if (cardWithHistory.clientName !== existingCard?.clientName) updates.clientName = cardWithHistory.clientName;
+          if (cardWithHistory.phone !== existingCard?.phone) updates.phone = cardWithHistory.phone;
+          if (cardWithHistory.instagram !== existingCard?.instagram) updates.instagram = cardWithHistory.instagram;
+          if (cardWithHistory.tiktok !== existingCard?.tiktok) updates.tiktok = cardWithHistory.tiktok;
+          if (cardWithHistory.tokopedia !== existingCard?.tokopedia) updates.tokopedia = cardWithHistory.tokopedia;
+          if (cardWithHistory.shopee !== existingCard?.shopee) updates.shopee = cardWithHistory.shopee;
+          if (cardWithHistory.subscriptionTier !== existingCard?.subscriptionTier) updates.subscriptionTier = cardWithHistory.subscriptionTier;
+          if (cardWithHistory.dealValue !== existingCard?.dealValue) updates.dealValue = cardWithHistory.dealValue;
+          if (cardWithHistory.liveUrl !== existingCard?.liveUrl) updates.liveUrl = cardWithHistory.liveUrl;
+          if (cardWithHistory.instagramFollowers !== existingCard?.instagramFollowers) updates.instagramFollowers = cardWithHistory.instagramFollowers;
+          if (cardWithHistory.tiktokFollowers !== existingCard?.tiktokFollowers) updates.tiktokFollowers = cardWithHistory.tiktokFollowers;
+          if (cardWithHistory.tokopediaFollowers !== existingCard?.tokopediaFollowers) updates.tokopediaFollowers = cardWithHistory.tokopediaFollowers;
+          if (cardWithHistory.shopeeFollowers !== existingCard?.shopeeFollowers) updates.shopeeFollowers = cardWithHistory.shopeeFollowers;
+          if (cardWithHistory.activityPhase !== existingCard?.activityPhase) updates.activityPhase = cardWithHistory.activityPhase;
+          if (cardWithHistory.stageId !== existingCard?.stageId) updates.stageId = cardWithHistory.stageId;
+          if (cardWithHistory.sectionId !== existingCard?.sectionId) updates.sectionId = cardWithHistory.sectionId;
+          if (cardWithHistory.assignedTo?.id !== existingCard?.assignedTo?.id) updates.assignedTo = cardWithHistory.assignedTo;
+          if (cardWithHistory.startDate?.getTime() !== existingCard?.startDate?.getTime()) updates.startDate = cardWithHistory.startDate;
+          
+          // Only update history if there are new entries (check if history array has changed)
+          const existingHistoryIds = new Set(existingCard?.history?.map(h => h.id) || []);
+          const newHistoryEntries = cardWithHistory.history?.filter(h => !existingHistoryIds.has(h.id)) || [];
+          if (newHistoryEntries.length > 0) {
+            // Only include new history entries, not the entire history array
+            updates.history = newHistoryEntries;
+          }
+          
+          // Always update collaborators if they're provided (they're managed separately)
+          if (cardWithHistory.collaborators !== undefined) {
+            updates.collaborators = cardWithHistory.collaborators;
+          }
+          
+          // Only update tags if they've changed
+          const existingTags = existingCard?.tags || [];
+          const newTags = cardWithHistory.tags || [];
+          if (JSON.stringify(existingTags.sort()) !== JSON.stringify(newTags.sort())) {
+            updates.tags = newTags;
+          }
+          
+          await dbCards.updateCard(card.id, updates, numericId);
           console.log('✅ Card updated in Supabase successfully');
         }
       } catch (error: any) {
@@ -611,23 +896,117 @@ export function KanbanBoard() {
     setNewColumnColor('stage-new');
   }, [boardState, newColumnName, newColumnColor, pipelineIdNum, pipelineId]);
 
-  const editStageName = async (stageId: string, newName: string) => {
+  const editStageName = async (stageId: string, newName: string, newColor?: string) => {
     // Update in Supabase
     try {
       const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
       if (numericId) {
-        await dbStages.updatePipelineStage(numericId, stageId, { name: newName });
+        const updates: { name: string; color?: string } = { name: newName };
+        if (newColor) {
+          updates.color = newColor;
+        }
+        await dbStages.updatePipelineStage(numericId, stageId, updates);
       }
     } catch (error) {
       console.error('Error updating stage in Supabase:', error);
     }
 
     setBoardState(prev => {
-      const newStages = prev.stages.map(s => s.id === stageId ? { ...s, name: newName } : s);
-      const newLanes = prev.lanes.map(l => l.stage.id === stageId ? { ...l, stage: { ...l.stage, name: newName } } : l);
+      const newStages = prev.stages.map(s => 
+        s.id === stageId 
+          ? { ...s, name: newName, ...(newColor && { color: newColor }) }
+          : s
+      );
+      const newLanes = prev.lanes.map(l => 
+        l.stage.id === stageId 
+          ? { ...l, stage: { ...l.stage, name: newName, ...(newColor && { color: newColor }) } }
+          : l
+      );
       return { ...prev, stages: newStages, lanes: newLanes };
     });
   };
+
+  const deleteStage = useCallback(async (stageId: string) => {
+    const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+    if (!numericId) {
+      console.error('Pipeline ID not found');
+      return;
+    }
+
+    // Find the lane
+    const lane = boardState.lanes.find(l => l.id === stageId);
+    if (!lane) {
+      console.error('Stage not found');
+      return;
+    }
+
+    // Get all cards in this stage
+    const cardsInStage = Object.values(boardState.cards).filter(c => c.stageId === stageId);
+
+    // Update local state: remove stage and move cards to first available stage (or remove them)
+    setBoardState(prev => {
+      // Find first available stage (not the one being deleted)
+      const firstAvailableStage = prev.lanes.find(l => l.id !== stageId);
+      
+      const updatedCards = { ...prev.cards };
+      // Move cards to first available stage, or remove if no other stage exists
+      if (firstAvailableStage) {
+        cardsInStage.forEach(card => {
+          updatedCards[card.id] = {
+            ...card,
+            stageId: firstAvailableStage.id,
+            sectionId: undefined, // Remove section assignment when moving
+          };
+        });
+      } else {
+        // No other stage, remove cards
+        cardsInStage.forEach(card => {
+          delete updatedCards[card.id];
+        });
+      }
+
+      // Remove stage from lanes and stages
+      const updatedLanes = prev.lanes.filter(l => l.id !== stageId);
+      const updatedStages = prev.stages.filter(s => s.id !== stageId);
+
+      return {
+        ...prev,
+        lanes: updatedLanes,
+        stages: updatedStages,
+        cards: updatedCards,
+      };
+    });
+
+    // Update cards in Supabase and delete stage
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        // Find first available stage
+        const firstAvailableStage = boardState.lanes.find(l => l.id !== stageId);
+        
+        // Move cards to first available stage
+        if (firstAvailableStage) {
+          for (const card of cardsInStage) {
+            await dbCards.updateCard(card.id, { 
+              stageId: firstAvailableStage.id, 
+              sectionId: undefined 
+            }, numericId);
+          }
+        }
+
+        // Delete stage from Supabase
+        await dbStages.deletePipelineStage(numericId, stageId);
+        console.log('✅ Stage deleted from Supabase successfully');
+      } else {
+        console.warn('User not authenticated, stage deleted locally only');
+      }
+    } catch (error: any) {
+      console.error('❌ Error deleting stage from Supabase:', error);
+      alert(`Error deleting stage: ${error.message || 'Unknown error'}`);
+      // Stage is already removed from local state
+    }
+  }, [boardState, pipelineId, pipelineIdNum]);
 
   const toggleWatch = useCallback((cardId: string, userId: string) => {
     setBoardState(prev => {
@@ -690,7 +1069,92 @@ export function KanbanBoard() {
       alert(`Error saving section: ${error.message || 'Unknown error'}`);
       // Section is already in local state, so it will work offline
     }
-  }, [boardState.lanes, pipelineId]);
+  }, [boardState.lanes, pipelineId, pipelineIdNum]);
+
+  const editSection = useCallback(async (stageId: string, sectionId: string, name: string, color: string) => {
+    const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+    if (!numericId) {
+      console.error('Pipeline ID not found');
+      return;
+    }
+
+    // Update local state
+    setBoardState(prev => ({
+      ...prev,
+      lanes: prev.lanes.map(l => 
+        l.id === stageId 
+          ? { 
+              ...l, 
+              sections: (l.sections || []).map(s => 
+                s.id === sectionId 
+                  ? { ...s, name, color }
+                  : s
+              )
+            } 
+          : l
+      )
+    }));
+
+    // Save to Supabase
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        await dbStages.updatePipelineSection(numericId, stageId, sectionId, { name, color });
+        console.log('✅ Section updated in Supabase successfully');
+      } else {
+        console.warn('User not authenticated, section updated locally only');
+      }
+    } catch (error: any) {
+      console.error('❌ Error updating section in Supabase:', error);
+      alert(`Error updating section: ${error.message || 'Unknown error'}`);
+    }
+  }, [pipelineId, pipelineIdNum]);
+
+  const reorderSections = useCallback(async (stageId: string, sectionOrders: { sectionId: string; order: number }[]) => {
+    const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId);
+    if (!numericId) {
+      console.error('Pipeline ID not found');
+      return;
+    }
+
+    // Update local state
+    setBoardState(prev => ({
+      ...prev,
+      lanes: prev.lanes.map(l => 
+        l.id === stageId 
+          ? { 
+              ...l, 
+              sections: (l.sections || []).map(s => {
+                const newOrder = sectionOrders.find(so => so.sectionId === s.id)?.order;
+                return newOrder !== undefined ? { ...s } : s;
+              }).sort((a, b) => {
+                const orderA = sectionOrders.find(so => so.sectionId === a.id)?.order ?? 999;
+                const orderB = sectionOrders.find(so => so.sectionId === b.id)?.order ?? 999;
+                return orderA - orderB;
+              })
+            } 
+          : l
+      )
+    }));
+
+    // Save to Supabase
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const authUser = await getCurrentAuthUser();
+      if (authUser) {
+        for (const { sectionId, order } of sectionOrders) {
+          await dbStages.updatePipelineSection(numericId, stageId, sectionId, { order });
+        }
+        console.log('✅ Section order updated in Supabase successfully');
+      } else {
+        console.warn('User not authenticated, section order updated locally only');
+      }
+    } catch (error: any) {
+      console.error('❌ Error updating section order in Supabase:', error);
+      alert(`Error updating section order: ${error.message || 'Unknown error'}`);
+    }
+  }, [pipelineId, pipelineIdNum]);
 
   // Filter cards based on search
   const filteredLanes = boardState.lanes.map(lane => ({
@@ -815,21 +1279,51 @@ export function KanbanBoard() {
       ) : (
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
-          <div className="flex gap-5 h-full">
-            {filteredLanes.map(lane => (
-              <KanbanLane
-                key={lane.id}
-                lane={lane}
-                cards={lane.cardIds.map(id => boardState.cards[id])}
-                onCardClick={handleCardClick}
-                onAddCard={handleAddCard}
-                onEditStage={editStageName}
-                currentUser={currentUser}
-                onToggleWatch={toggleWatch}
-                onAddSection={addSection}
-              />
-            ))}
-          </div>
+          <Droppable droppableId="columns" type="COLUMN" direction="horizontal">
+            {(provided, snapshot) => (
+              <div
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+                className={cn(
+                  "flex gap-5 h-full",
+                  snapshot.isDraggingOver && "bg-accent/10"
+                )}
+              >
+                {filteredLanes.map((lane, index) => (
+                  <Draggable key={lane.id} draggableId={`column-${lane.id}`} index={index} type="COLUMN">
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={cn(
+                          "flex-shrink-0",
+                          snapshot.isDragging && "opacity-50"
+                        )}
+                        style={provided.draggableProps.style}
+                      >
+                        <KanbanLane
+                          lane={lane}
+                          cards={lane.cardIds.map(id => boardState.cards[id])}
+                          onCardClick={handleCardClick}
+                          onAddCard={handleAddCard}
+                          onEditStage={editStageName}
+                          onDeleteStage={deleteStage}
+                          currentUser={currentUser}
+                          onToggleWatch={toggleWatch}
+                          onAddSection={addSection}
+                          onEditSection={editSection}
+                          onDeleteSection={deleteSection}
+                          onReorderSections={reorderSections}
+                          dragHandleProps={provided.dragHandleProps}
+                        />
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
         </div>
       </DragDropContext>
       )}
@@ -846,6 +1340,7 @@ export function KanbanBoard() {
           onClose={() => setSelectedCard(null)}
           onUpdate={handleCardUpdate}
           onSave={saveDraftCard}
+          onDelete={handleCardDelete}
           isDraft={!boardState.cards[selectedCard.id]}
         />
       )}

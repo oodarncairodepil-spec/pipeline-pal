@@ -1,10 +1,11 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Calendar, Instagram, Eye } from 'lucide-react';
+import { Calendar, Instagram, Eye, Phone } from 'lucide-react';
 import { LeadCard, Stage } from '@/types/pipeline';
 import { getNotificationsForUser } from '@/lib/settings';
 import { getRunningDays, formatRunningDays } from '@/lib/pipeline-utils';
 import { MemberAvatar } from './MemberAvatar';
 import { StageBadge } from './StageBadge';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
 
@@ -59,9 +60,10 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
     if (!url) return url;
     
     try {
-      // If it's already a handle (starts with @ or doesn't contain http), return as is
+      // If it's already a handle (starts with @ or doesn't contain http), decode and return
       if (url.startsWith('@') || !url.includes('http')) {
-        return url;
+        // Decode URL encoding (e.g., %20 -> space)
+        return decodeURIComponent(url);
       }
 
       const urlObj = new URL(url);
@@ -72,37 +74,51 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
           // TikTok: https://www.tiktok.com/@username -> @username
           const tiktokMatch = pathname.match(/^\/@([^\/]+)/);
           if (tiktokMatch) {
-            return `@${tiktokMatch[1]}`;
+            // Decode URL encoding
+            return `@${decodeURIComponent(tiktokMatch[1])}`;
           }
           break;
         case 'instagram':
           // Instagram: https://www.instagram.com/username/ -> username
           const instagramMatch = pathname.match(/^\/([^\/]+)/);
           if (instagramMatch) {
-            return instagramMatch[1];
+            // Decode URL encoding
+            return decodeURIComponent(instagramMatch[1]);
           }
           break;
         case 'tokopedia':
           // Tokopedia: https://www.tokopedia.com/storename -> storename
           const tokopediaMatch = pathname.match(/^\/([^\/]+)/);
           if (tokopediaMatch) {
-            return tokopediaMatch[1];
+            // Decode URL encoding
+            return decodeURIComponent(tokopediaMatch[1]);
           }
           break;
         case 'shopee':
           // Shopee: https://shopee.co.id/storename -> storename
           const shopeeMatch = pathname.match(/^\/([^\/]+)/);
           if (shopeeMatch) {
-            return shopeeMatch[1];
+            // Decode URL encoding
+            return decodeURIComponent(shopeeMatch[1]);
           }
           break;
       }
     } catch (e) {
-      // If URL parsing fails, return original
+      // If URL parsing fails, try to decode the original value
+      try {
+        return decodeURIComponent(url);
+      } catch (decodeError) {
+        // If decoding also fails, return original
+        return url;
+      }
     }
     
-    // Fallback: return original value
-    return url;
+    // Fallback: try to decode the original value
+    try {
+      return decodeURIComponent(url);
+    } catch (e) {
+      return url;
+    }
   };
 
   return (
@@ -149,6 +165,14 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
             </span>
           </div>
 
+          {/* Phone */}
+          {card.phone && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+              <Phone className="w-3 h-3" />
+              <span>{card.phone}</span>
+            </div>
+          )}
+
           {/* Socials */}
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
             {card.instagram && (
@@ -177,6 +201,17 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
             )}
             
           </div>
+
+          {/* Tags */}
+          {card.tags && card.tags.length > 0 && (
+            <div className="mt-2 flex items-center gap-1 flex-wrap">
+              {card.tags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0.5">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
 
           {/* Phase */}
           <div className="mt-2 flex items-center gap-2">

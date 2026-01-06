@@ -66,19 +66,19 @@ export default function Profile() {
           </div>
         </div>
         {showAvatarSelection && (
-          <div>
-            <label className="text-xs text-muted-foreground">Select avatar</label>
-            <div className="flex flex-wrap gap-2 mt-2">
-              {presets.map(seed => (
+        <div>
+          <label className="text-xs text-muted-foreground">Select avatar</label>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {presets.map(seed => (
                 <button key={seed} className="rounded-md border p-1" onClick={() => {
                   setAvatar(avatarUrl(seed));
                   setShowAvatarSelection(false);
                 }}>
-                  <img src={avatarUrl(seed)} className="w-12 h-12 rounded-md" />
-                </button>
-              ))}
-            </div>
+                <img src={avatarUrl(seed)} className="w-12 h-12 rounded-md" />
+              </button>
+            ))}
           </div>
+        </div>
         )}
         <div className="grid grid-cols-2 gap-4">
           <div>

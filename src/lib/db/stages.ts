@@ -226,6 +226,32 @@ export const createPipelineSection = async (
   if (error) throw error;
 };
 
+export const updatePipelineSection = async (
+  pipelineId: string | number,
+  stageId: string,
+  sectionId: string,
+  updates: { name?: string; color?: string; order?: number }
+): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
+  
+  const updateData: any = {};
+  if (updates.name !== undefined) updateData.name = updates.name;
+  if (updates.color !== undefined) updateData.color = updates.color;
+  if (updates.order !== undefined) updateData.order = updates.order;
+
+  if (Object.keys(updateData).length === 0) return;
+
+  const { error } = await supabase
+    .from('pipeline_sections')
+    .update(updateData)
+    .eq('id', sectionId)
+    .eq('pipeline_id', numericId)
+    .eq('stage_id', stageId);
+
+  if (error) throw error;
+};
+
 export const deletePipelineSection = async (
   pipelineId: string | number,
   stageId: string,

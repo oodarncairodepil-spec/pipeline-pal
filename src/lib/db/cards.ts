@@ -444,15 +444,29 @@ export const updateCard = async (
   // Handle history update - append new history events only
   if (updates.history !== undefined) {
     // Get existing history
-    const { data: existingHistory } = await supabase
+    const { data: existingHistory, error: fetchError } = await supabase
       .from('card_history')
       .select('id')
       .eq('card_id', cardId);
 
+    if (fetchError) {
+      console.error('Error fetching existing history:', fetchError);
+      // Continue anyway - might be RLS issue
+    }
+
     const existingHistoryIds = new Set((existingHistory || []).map(h => h.id));
     
-    // Insert only new history events
-    const newHistory = updates.history.filter(hist => !existingHistoryIds.has(hist.id));
+    // Check for duplicate IDs in the incoming history array
+    const incomingHistoryIds = updates.history.map(h => h.id);
+    
+    // Remove duplicates from incoming history (keep first occurrence)
+    const uniqueHistory = updates.history.filter((hist, index) => {
+      return incomingHistoryIds.indexOf(hist.id) === index;
+    });
+    
+    // Insert only new history events (not in database and not duplicates)
+    const newHistory = uniqueHistory.filter(hist => !existingHistoryIds.has(hist.id));
+    
     if (newHistory.length > 0) {
       const { error } = await supabase
         .from('card_history')
@@ -466,6 +480,7 @@ export const updateCard = async (
             timestamp: hist.timestamp.toISOString(),
           }))
         );
+      
       if (error) throw error;
     }
   }
@@ -473,7 +488,12 @@ export const updateCard = async (
   // Handle collaborators update
   if (updates.collaborators !== undefined) {
     // Delete existing collaborators
-    await supabase.from('card_collaborators').delete().eq('card_id', cardId);
+    const { error: deleteError } = await supabase.from('card_collaborators').delete().eq('card_id', cardId);
+    
+    if (deleteError) {
+      console.error('Error deleting existing collaborators:', deleteError);
+      // Continue anyway - might be RLS issue or no existing collaborators
+    }
     
     // Insert new collaborators
     if (updates.collaborators.length > 0) {
@@ -552,5 +572,85 @@ export const addCardFile = async (
     });
 
   if (error) throw error;
+};
+
+export const deleteCard = async (cardId: string, pipelineId: string | number): Promise<void> => {
+  const supabase = getSupabaseClient();
+  const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
+
+  // Delete all related data first (due to foreign key constraints)
+  // Delete in order: card_tags, card_watchers, card_collaborators, card_notes, card_history, card_files, then card
+  
+  // Delete card_tags
+  const { error: tagsError } = await supabase
+    .from('card_tags')
+    .delete()
+    .eq('card_id', cardId);
+  if (tagsError) {
+    console.error('Error deleting card_tags:', tagsError);
+    throw tagsError;
+  }
+
+  // Delete card_watchers
+  const { error: watchersError } = await supabase
+    .from('card_watchers')
+    .delete()
+    .eq('card_id', cardId);
+  if (watchersError) {
+    console.error('Error deleting card_watchers:', watchersError);
+    throw watchersError;
+  }
+
+  // Delete card_collaborators
+  const { error: collaboratorsError } = await supabase
+    .from('card_collaborators')
+    .delete()
+    .eq('card_id', cardId);
+  if (collaboratorsError) {
+    console.error('Error deleting card_collaborators:', collaboratorsError);
+    throw collaboratorsError;
+  }
+
+  // Delete card_notes
+  const { error: notesError } = await supabase
+    .from('card_notes')
+    .delete()
+    .eq('card_id', cardId);
+  if (notesError) {
+    console.error('Error deleting card_notes:', notesError);
+    throw notesError;
+  }
+
+  // Delete card_history
+  const { error: historyError } = await supabase
+    .from('card_history')
+    .delete()
+    .eq('card_id', cardId);
+  if (historyError) {
+    console.error('Error deleting card_history:', historyError);
+    throw historyError;
+  }
+
+  // Delete card_files
+  const { error: filesError } = await supabase
+    .from('card_files')
+    .delete()
+    .eq('card_id', cardId);
+  if (filesError) {
+    console.error('Error deleting card_files:', filesError);
+    throw filesError;
+  }
+
+  // Finally, delete the card itself
+  const { error: cardError } = await supabase
+    .from('cards')
+    .delete()
+    .eq('id', cardId)
+    .eq('pipeline_id', numericId);
+  
+  if (cardError) {
+    console.error('Error deleting card:', cardError);
+    throw cardError;
+  }
 };
 
