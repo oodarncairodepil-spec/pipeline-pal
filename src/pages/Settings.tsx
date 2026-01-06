@@ -641,6 +641,9 @@ export default function Settings() {
                         role: nm.role as 'staff' | 'manager',
                       };
                       const next = [...current, memberToAdd];
+                      // #region agent log
+                      fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:643',message:'Settings calling setPipelineMembers',data:{pipelineId:p.id,pipelineIdType:typeof p.id,pipelineName:p.name,memberToAdd:memberToAdd,nextLength:next.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                      // #endregion
                       try {
                         await setPipelineMembers(p.id, next);
                         setMembersByPipeline(prev => ({ ...prev, [p.name]: next }));

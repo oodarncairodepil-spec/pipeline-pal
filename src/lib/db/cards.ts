@@ -128,6 +128,7 @@ export const getCards = async (pipelineId: string | number): Promise<Record<stri
       tokopediaFollowers: card.tokopedia_followers || undefined,
       shopeeFollowers: card.shopee_followers || undefined,
       startDate: new Date(card.start_date),
+      liveDateTarget: card.live_date_target ? new Date(card.live_date_target) : undefined,
       stageId: card.stage_id,
       sectionId: card.section_id || undefined,
       assignedTo: card.assigned_to ? usersMap.get(card.assigned_to) : undefined,
@@ -172,6 +173,7 @@ export const createCard = async (card: LeadCard, pipelineId: string | number): P
       activity_phase: card.activityPhase || null,
       assigned_to: card.assignedTo?.id || null,
       start_date: card.startDate.toISOString().split('T')[0],
+      live_date_target: card.liveDateTarget ? card.liveDateTarget.toISOString().split('T')[0] : null,
     });
 
   if (cardError) throw cardError;
@@ -321,6 +323,7 @@ export const updateCard = async (
   if (updates.sectionId !== undefined) cardUpdates.section_id = updates.sectionId || null;
   if (updates.assignedTo !== undefined) cardUpdates.assigned_to = updates.assignedTo?.id || null;
   if (updates.startDate !== undefined) cardUpdates.start_date = updates.startDate.toISOString().split('T')[0];
+  if (updates.liveDateTarget !== undefined) cardUpdates.live_date_target = updates.liveDateTarget ? updates.liveDateTarget.toISOString().split('T')[0] : null;
 
   if (Object.keys(cardUpdates).length > 0) {
     const { error } = await supabase
@@ -468,20 +471,40 @@ export const updateCard = async (
     const newHistory = uniqueHistory.filter(hist => !existingHistoryIds.has(hist.id));
     
     if (newHistory.length > 0) {
-      const { error } = await supabase
-        .from('card_history')
-        .insert(
-          newHistory.map(hist => ({
-            id: hist.id,
-            card_id: cardId,
-            event_type: hist.type,
-            user_id: hist.user.id,
-            details: hist.details,
-            timestamp: hist.timestamp.toISOString(),
-          }))
-        );
-      
-      if (error) throw error;
+      // Try using the SECURITY DEFINER function first (bypasses RLS)
+      try {
+        for (const hist of newHistory) {
+          const { error: rpcError } = await supabase.rpc('insert_card_history', {
+            p_id: hist.id,
+            p_card_id: cardId,
+            p_event_type: hist.type,
+            p_user_id: hist.user.id,
+            p_details: hist.details || {},
+            p_timestamp: hist.timestamp.toISOString(),
+          });
+          
+          if (rpcError) {
+            // If RPC fails, fall back to direct insert
+            throw rpcError;
+          }
+        }
+      } catch (rpcError: any) {
+        // Fallback to direct insert (will respect RLS)
+        const { error } = await supabase
+          .from('card_history')
+          .insert(
+            newHistory.map(hist => ({
+              id: hist.id,
+              card_id: cardId,
+              event_type: hist.type,
+              user_id: hist.user.id,
+              details: hist.details,
+              timestamp: hist.timestamp.toISOString(),
+            }))
+          );
+        
+        if (error) throw error;
+      }
     }
   }
 
@@ -572,6 +595,68 @@ export const addCardFile = async (
     });
 
   if (error) throw error;
+};
+
+export const getAllClientNames = async (): Promise<string[]> => {
+  const supabase = getSupabaseClient();
+  
+  // Fetch all unique client names from all pipelines the user has access to
+  // Using DISTINCT ON to get unique client names
+  const { data, error } = await supabase
+    .from('cards')
+    .select('client_name')
+    .not('client_name', 'is', null)
+    .neq('client_name', '')
+    .order('client_name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching client names:', error);
+    return [];
+  }
+
+  // Extract unique client names
+  const uniqueNames = Array.from(new Set((data || []).map(c => c.client_name).filter(Boolean)));
+  return uniqueNames.sort();
+};
+
+export const getCardByClientName = async (clientName: string): Promise<Partial<LeadCard> | null> => {
+  const supabase = getSupabaseClient();
+  
+  // Fetch the most recent card for this client name
+  const { data: cardsData, error } = await supabase
+    .from('cards')
+    .select('*')
+    .eq('client_name', clientName)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching card by client name:', error);
+    return null;
+  }
+
+  if (!cardsData) {
+    return null;
+  }
+
+  // Return partial card data (excluding id, stageId, sectionId, notes, history, files, etc.)
+  // Only return the fields that should be copied when selecting an existing client
+  return {
+    phone: cardsData.phone || undefined,
+    instagram: cardsData.instagram || undefined,
+    tiktok: cardsData.tiktok || undefined,
+    tokopedia: cardsData.tokopedia || undefined,
+    shopee: cardsData.shopee || undefined,
+    subscriptionTier: cardsData.subscription_tier || 'Basic',
+    dealValue: Number(cardsData.deal_value) || undefined,
+    liveUrl: cardsData.live_url || undefined,
+    instagramFollowers: cardsData.instagram_followers || undefined,
+    tiktokFollowers: cardsData.tiktok_followers || undefined,
+    tokopediaFollowers: cardsData.tokopedia_followers || undefined,
+    shopeeFollowers: cardsData.shopee_followers || undefined,
+    liveDateTarget: cardsData.live_date_target ? new Date(cardsData.live_date_target) : undefined,
+  };
 };
 
 export const deleteCard = async (cardId: string, pipelineId: string | number): Promise<void> => {

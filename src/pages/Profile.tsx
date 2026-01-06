@@ -3,24 +3,55 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MemberAvatar } from '@/components/MemberAvatar';
 import { getCurrentUser, setCurrentUser } from '@/lib/settings';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppHeader } from '@/components/AppHeader';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { TeamMember } from '@/types/pipeline';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const initial = getCurrentUser();
-  const [name, setName] = useState(initial.name || '');
-  const [email, setEmail] = useState(initial.email || '');
-  const [avatar, setAvatar] = useState(initial.avatar || '');
+  const [initial, setInitial] = useState<TeamMember | null>(null);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [avatar, setAvatar] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [showAvatarSelection, setShowAvatarSelection] = useState(false);
+  const [loading, setLoading] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const user = await getCurrentUser();
+        setInitial(user);
+        setName(user.name || '');
+        setEmail(user.email || '');
+        setAvatar(user.avatar || '');
+      } catch (error) {
+        console.error('Error loading user:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadUser();
+  }, []);
 
   const presets = ['Alex','Jamie','Taylor','Rina','Budi','Ava','Sam'];
   const avatarUrl = (seed: string) => `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4`;
+
+  if (loading || !initial) {
+    return (
+      <>
+        <Helmet><title>Profile</title></Helmet>
+        <AppHeader title="Profile" subtitle="Update your info and avatar" hideSearchAndFilter />
+        <div className="p-6 space-y-6">
+          <div className="text-center text-muted-foreground">Loading...</div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -28,7 +59,7 @@ export default function Profile() {
       <AppHeader title="Profile" subtitle="Update your info and avatar" hideSearchAndFilter />
       <div className="p-6 space-y-6">
         <div className="flex items-center gap-4">
-          <MemberAvatar member={{ id: initial.id, name, avatar, role: 'manager', email }} size="md" />
+          <MemberAvatar member={{ id: initial.id, name, avatar, role: initial.role, email }} size="md" />
           <div className="flex gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -91,9 +122,14 @@ export default function Profile() {
           </div>
         </div>
         <div className="flex justify-end">
-          <Button onClick={() => {
-            setCurrentUser({ ...initial, name, email, avatar, password: newPassword || password });
-            navigate(`/pipeline/default`);
+          <Button onClick={async () => {
+            try {
+              await setCurrentUser({ id: initial.id, name, email, avatar, role: initial.role });
+              navigate(`/pipeline/default`);
+            } catch (error) {
+              console.error('Error saving profile:', error);
+              alert('Failed to save profile. Please try again.');
+            }
           }}>Save</Button>
         </div>
       </div>

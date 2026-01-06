@@ -18,11 +18,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { getTags, setTags, getPipelineActivityPhases, pushNotificationForUser } from '@/lib/settings';
 import { useParams, useLocation } from 'react-router-dom';
 import { getSubscriptionTiers } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import * as dbCards from '@/lib/db/cards';
 
 interface CardDetailPanelProps {
   card: LeadCard;
@@ -89,6 +91,11 @@ export function CardDetailPanel({
 
   const tagSuggestions = allTags.filter(t => t.toLowerCase().includes(tagInput.toLowerCase())).filter(t => !(card.tags || []).includes(t)).slice(0, 5);
   const [dealInput, setDealInput] = useState<string>(() => (card.dealValue ?? 0).toLocaleString());
+  
+  // Update dealInput when card.dealValue changes
+  useEffect(() => {
+    setDealInput((card.dealValue ?? 0).toLocaleString());
+  }, [card.dealValue]);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionOptions, setMentionOptions] = useState<TeamMember[]>([]);
@@ -412,8 +419,25 @@ export function CardDetailPanel({
                                   <CommandItem
                                     key={name}
                                     value={name}
-                                    onSelect={() => {
-                                      onUpdate(card.id, { clientName: name });
+                                    onSelect={async () => {
+                                      // Load existing client data
+                                      try {
+                                        const clientData = await dbCards.getCardByClientName(name);
+                                        if (clientData) {
+                                          // Update card with existing client data
+                                          onUpdate(card.id, {
+                                            clientName: name,
+                                            ...clientData,
+                                          });
+                                        } else {
+                                          // Just update the client name if no data found
+                                          onUpdate(card.id, { clientName: name });
+                                        }
+                                      } catch (error) {
+                                        console.error('Error loading client data:', error);
+                                        // Fallback: just update the client name
+                                        onUpdate(card.id, { clientName: name });
+                                      }
                                       setClientNameOpen(false);
                                       setClientNameSearch('');
                                     }}
@@ -488,6 +512,31 @@ export function CardDetailPanel({
                         onUpdate(card.id, { dealValue: raw ? Number(raw) : undefined });
                       }}
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Live Date Target</label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full justify-start text-left font-normal",
+                            !card.liveDateTarget && "text-muted-foreground"
+                          )}
+                        >
+                          <Calendar className="mr-2 h-4 w-4" />
+                          {card.liveDateTarget ? format(card.liveDateTarget, 'MMM d, yyyy') : 'Select date'}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={card.liveDateTarget}
+                          onSelect={(date) => onUpdate(card.id, { liveDateTarget: date || undefined })}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">

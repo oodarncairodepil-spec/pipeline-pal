@@ -3,6 +3,7 @@ import { Calendar, Instagram, Eye, Phone } from 'lucide-react';
 import { LeadCard, Stage } from '@/types/pipeline';
 import { getNotificationsForUser } from '@/lib/settings';
 import { getRunningDays, formatRunningDays } from '@/lib/pipeline-utils';
+import { format } from 'date-fns';
 import { MemberAvatar } from './MemberAvatar';
 import { StageBadge } from './StageBadge';
 import { Badge } from '@/components/ui/badge';
@@ -164,6 +165,14 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
               {formatRunningDays(runningDays)}
             </span>
           </div>
+
+          {/* Live Date Target */}
+          {card.liveDateTarget && (
+            <div className="flex items-center gap-1 text-xs text-muted-foreground mb-2">
+              <Calendar className="w-3 h-3" />
+              <span>Live Target: {format(card.liveDateTarget, 'MMM d, yyyy')}</span>
+            </div>
+          )}
 
           {/* Phone */}
           {card.phone && (

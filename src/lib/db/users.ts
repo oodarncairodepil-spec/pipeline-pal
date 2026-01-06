@@ -109,11 +109,25 @@ export const addPipelineMember = async (
   const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
   
   // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:102',message:'addPipelineMember entry',data:{pipelineId:numericId,userId:userId,role:role,invitationStatus:invitationStatus},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  const { data: { user: currentUser } } = await supabase.auth.getUser();
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:102',message:'addPipelineMember entry',data:{pipelineId:numericId,userId:userId,role:role,invitationStatus:invitationStatus,currentUserId:currentUser?.id,isNumeric:!isNaN(numericId)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  
+  // #region agent log
+  const { data: userRoleData } = await supabase.from('users').select('role').eq('id', currentUser?.id).single();
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:108',message:'addPipelineMember current user role check',data:{currentUserId:currentUser?.id,userRole:userRoleData?.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
+  
+  // #region agent log
+  const { data: managerCheck } = await supabase.rpc('is_pipeline_manager', { p_pipeline_id: numericId, p_user_id: currentUser?.id });
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:111',message:'addPipelineMember is_pipeline_manager check',data:{pipelineId:numericId,currentUserId:currentUser?.id,isManager:managerCheck},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
   // #endregion
   
   // Try using the SECURITY DEFINER function first (bypasses RLS)
-  const { error: rpcError } = await supabase.rpc('add_pipeline_member', {
+  // #region agent log
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:115',message:'addPipelineMember calling RPC',data:{p_pipeline_id:numericId,p_user_id:userId,p_role:role,p_invitation_status:invitationStatus},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  const { error: rpcError, data: rpcData } = await supabase.rpc('add_pipeline_member', {
     p_pipeline_id: numericId,
     p_user_id: userId,
     p_role: role,
@@ -121,7 +135,7 @@ export const addPipelineMember = async (
   });
   
   // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:113',message:'addPipelineMember RPC result',data:{hasError:!!rpcError,errorCode:rpcError?.code,errorMessage:rpcError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:123',message:'addPipelineMember RPC result',data:{hasError:!!rpcError,errorCode:rpcError?.code,errorMessage:rpcError?.message,errorDetails:rpcError?.details,errorHint:rpcError?.hint,rpcData:rpcData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
   // #endregion
   
   if (!rpcError) {

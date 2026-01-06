@@ -62,6 +62,7 @@ export interface LeadCard {
   tokopediaFollowers?: number;
   shopeeFollowers?: number;
   startDate: Date;
+  liveDateTarget?: Date;
   stageId: StageId;
   assignedTo?: TeamMember;
   collaborators?: TeamMember[];

@@ -42,6 +42,7 @@ export function KanbanBoard() {
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [pipelineIdNum, setPipelineIdNum] = useState<number | null>(null);
+  const [allClientNames, setAllClientNames] = useState<string[]>([]);
   const uid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const navigate = useNavigate();
   const pipelineTitle = `${(pipelines.find(p => p.name === pipelineId)?.name || 'Sales')} Pipeline`;
@@ -716,6 +717,11 @@ export function KanbanBoard() {
           console.log('Creating new card in Supabase...');
           await dbCards.createCard(cardWithHistory, numericId);
           console.log('✅ Card created in Supabase successfully');
+          
+          // Update allClientNames if this is a new client name
+          if (card.clientName && !allClientNames.includes(card.clientName)) {
+            setAllClientNames(prev => [...prev, card.clientName].sort());
+          }
         } else {
           // Update existing card
           console.log('Updating existing card in Supabase...');
@@ -766,6 +772,11 @@ export function KanbanBoard() {
           
           await dbCards.updateCard(card.id, updates, numericId);
           console.log('✅ Card updated in Supabase successfully');
+          
+          // Update allClientNames if client name changed
+          if (card.clientName && !allClientNames.includes(card.clientName)) {
+            setAllClientNames(prev => [...prev, card.clientName].sort());
+          }
         }
       } catch (error: any) {
         console.error('❌ Error saving card to Supabase:', error);
@@ -806,14 +817,16 @@ export function KanbanBoard() {
           console.error('Error getting pipeline ID:', error);
         }
 
-        const [boardData, user, pipelineList] = await Promise.all([
+        const [boardData, user, pipelineList, clientNames] = await Promise.all([
           loadInitialBoardState(pipelineId),
           getCurrentUser(),
           getPipelines(),
+          dbCards.getAllClientNames(),
         ]);
         setBoardState(boardData);
         setCurrentUser(user);
         setPipelines(pipelineList);
+        setAllClientNames(clientNames);
         
         // Update numeric ID if we got it from boardData
         if (!numericId && pipelineList.length > 0) {
@@ -1336,7 +1349,7 @@ export function KanbanBoard() {
           teamMembers={boardState.teamMembers}
           currentUser={currentUser}
           sectionsByStage={Object.fromEntries(boardState.lanes.map(l => [l.id, (l.sections || []).map(s => ({ id: s.id, name: s.name, color: s.color }))]))}
-          existingClientNames={Array.from(new Set(Object.values(boardState.cards).map(c => c.clientName).filter(Boolean)))}
+          existingClientNames={allClientNames}
           onClose={() => setSelectedCard(null)}
           onUpdate={handleCardUpdate}
           onSave={saveDraftCard}
