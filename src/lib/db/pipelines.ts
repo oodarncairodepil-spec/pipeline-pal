@@ -3,33 +3,20 @@ import { PipelineRef } from '../settings';
 
 export const getPipelines = async (): Promise<PipelineRef[]> => {
   const supabase = getSupabaseClient();
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:4',message:'getPipelines entry',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   
   // Check auth state
   const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:7',message:'getPipelines auth check',data:{hasUser:!!authUser,userId:authUser?.id,authError:authError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
   
   // Check user role
   let userRole = null;
   if (authUser) {
     const { data: userData, error: userError } = await supabase.from('users').select('role').eq('id', authUser.id).maybeSingle();
     userRole = userData?.role;
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:14',message:'getPipelines user role check',data:{userId:authUser.id,userRole:userRole,userError:userError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
   }
   
   // Try to use the RPC function first (for managers to see all pipelines)
   const { data: rpcData, error: rpcError } = await supabase
     .rpc('get_all_pipelines_for_manager');
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:22',message:'getPipelines RPC result',data:{hasError:!!rpcError,errorCode:rpcError?.code,errorMessage:rpcError?.message,hasData:!!rpcData,dataIsArray:Array.isArray(rpcData),dataLength:Array.isArray(rpcData)?rpcData.length:null,rpcDataSample:Array.isArray(rpcData)&&rpcData.length>0?rpcData[0]:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   
   if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
     // RPC function succeeded, return the data
@@ -38,9 +25,6 @@ export const getPipelines = async (): Promise<PipelineRef[]> => {
       id: (p.pipeline_id ?? p.id) as number, 
       name: (p.pipeline_name ?? p.name) as string 
     }));
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:18',message:'getPipelines returning RPC result',data:{resultLength:result.length,resultSample:result[0]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     return result;
   }
   
@@ -50,10 +34,6 @@ export const getPipelines = async (): Promise<PipelineRef[]> => {
     .select('id, name')
     .order('created_at', { ascending: true });
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:28',message:'getPipelines direct query result',data:{hasError:!!error,errorCode:error?.code,errorMessage:error?.message,hasData:!!data,dataIsArray:Array.isArray(data),dataLength:Array.isArray(data)?data.length:null,dataSample:Array.isArray(data)&&data.length>0?data[0]:null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-
   if (error) {
     console.error('Error fetching pipelines:', error);
     // Return empty array if error (no defaults with numeric IDs)
@@ -61,9 +41,6 @@ export const getPipelines = async (): Promise<PipelineRef[]> => {
   }
 
   const result = (data || []).map(p => ({ id: p.id as number, name: p.name }));
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'pipelines.ts:36',message:'getPipelines returning direct query result',data:{resultLength:result.length,resultSample:result[0]},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   return result;
 };
 
@@ -311,4 +288,3 @@ export const getPipelineIdByName = async (name: string): Promise<number | null> 
   const pipeline = await getPipelineByName(name);
   return pipeline?.id ?? null;
 };
-

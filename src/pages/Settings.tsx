@@ -71,14 +71,8 @@ export default function Settings() {
           dbUsers.getUsers(),
         ]);
         const unread = user ? await getUnreadNotificationCount(user.id) : 0;
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:73',message:'getPipelines result in Settings',data:{pipelinesLength:pipelines.length,pipelines:pipelines},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         console.log('Loaded pipelines:', pipelines);
         setPipelineList(pipelines);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:79',message:'setPipelineList called',data:{pipelinesLength:pipelines.length,pipelines:pipelines},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         // Store original names for tracking changes
         const originalNames: Record<number, string> = {};
         pipelines.forEach(p => {
@@ -331,19 +325,7 @@ export default function Settings() {
                 }}>Create</Button>
               </div>
               <div className="space-y-2">
-                    {/* #region agent log */}
-                    {(() => {
-                      fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:333',message:'Rendering pipeline list',data:{pipelineListLength:pipelineList.length,pipelineList:pipelineList,loading:loading,pipelinesOpen:pipelinesOpen},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                      return null;
-                    })()}
-                    {/* #endregion */}
-                    {(() => {
-                      const isEmpty = pipelineList.length === 0;
-                      // #region agent log
-                      fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:340',message:'Condition check for pipeline list',data:{pipelineListLength:pipelineList.length,isEmpty:isEmpty,pipelineList:pipelineList},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-                      // #endregion
-                      return isEmpty;
-                    })() ? (
+                    {pipelineList.length === 0 ? (
                       <div className="text-sm text-muted-foreground py-4 text-center">
                         No pipelines yet. Create one above.
                       </div>
@@ -641,9 +623,6 @@ export default function Settings() {
                         role: nm.role as 'staff' | 'manager',
                       };
                       const next = [...current, memberToAdd];
-                      // #region agent log
-                      fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:643',message:'Settings calling setPipelineMembers',data:{pipelineId:p.id,pipelineIdType:typeof p.id,pipelineName:p.name,memberToAdd:memberToAdd,nextLength:next.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-                      // #endregion
                       try {
                         await setPipelineMembers(p.id, next);
                         setMembersByPipeline(prev => ({ ...prev, [p.name]: next }));
@@ -1035,17 +1014,8 @@ export default function Settings() {
                   try {
                     // Use name as key (since membersByPipeline uses name as key)
                     const members = membersByPipeline[pipeline.name] || [];
-                    // #region agent log
-                    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:1030',message:'Save All Changes - saving members',data:{pipelineId:pipeline.id,pipelineName:pipeline.name,membersLength:members.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-                    // #endregion
                     await setPipelineMembers(pipeline.id, members);
-                    // #region agent log
-                    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:1035',message:'Save All Changes - members saved',data:{pipelineId:pipeline.id,pipelineName:pipeline.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-                    // #endregion
                   } catch (error) {
-                    // #region agent log
-                    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Settings.tsx:1038',message:'Save All Changes - members error',data:{pipelineId:pipeline.id,pipelineName:pipeline.name,error:error instanceof Error ? error.message : String(error),errorCode:(error as any)?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-                    // #endregion
                     errors.push(`Members for ${pipeline.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
                   }
                 }

@@ -223,33 +223,18 @@ export const setPipelineMembers = async (pipelineId: string | number, members: a
   // Sync members with Supabase pipeline_members table
   const { getPipelineMembers, addPipelineMember, updatePipelineMember, removePipelineMember } = await import('./db/users');
   
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:212',message:'setPipelineMembers entry',data:{pipelineId:pipelineId,membersLength:members.length,members:members.map(m=>({id:m.id,name:m.name,role:m.role}))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
-  
   try {
     const numericId = await getPipelineIdFromName(pipelineId);
     const numericIdStr = numericId.toString();
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:220',message:'setPipelineMembers got numericId',data:{numericId:numericId,numericIdStr:numericIdStr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     
     // Get existing members
     const existingMembers = await getPipelineMembers(numericIdStr);
     const existingUserIds = new Set(existingMembers.map(m => m.id));
     const newUserIds = new Set(members.map(m => m.id));
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:227',message:'setPipelineMembers existing members',data:{existingCount:existingMembers.length,existingIds:Array.from(existingUserIds),newIds:Array.from(newUserIds)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
     // Remove members that are no longer in the list
     for (const existing of existingMembers) {
       if (!newUserIds.has(existing.id)) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:232',message:'setPipelineMembers removing member',data:{userId:existing.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         await removePipelineMember(numericIdStr, existing.id);
       }
     }
@@ -260,9 +245,6 @@ export const setPipelineMembers = async (pipelineId: string | number, members: a
         // Update existing member (role might have changed)
         const existing = existingMembers.find(m => m.id === member.id);
         if (existing && existing.role !== member.role) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:242',message:'setPipelineMembers updating member',data:{userId:member.id,oldRole:existing.role,newRole:member.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-          // #endregion
           await updatePipelineMember(numericIdStr, member.id, {
             role: member.role as 'manager' | 'staff',
             invitation_status: 'accepted', // Ensure they're accepted
@@ -270,20 +252,10 @@ export const setPipelineMembers = async (pipelineId: string | number, members: a
         }
       } else {
         // Add new member
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:251',message:'setPipelineMembers adding member',data:{userId:member.id,role:member.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         await addPipelineMember(numericIdStr, member.id, member.role as 'manager' | 'staff', 'accepted');
       }
     }
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:257',message:'setPipelineMembers success',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'settings.ts:261',message:'setPipelineMembers error',data:{error:error instanceof Error ? error.message : String(error),errorCode:(error as any)?.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     console.error('Error syncing pipeline members:', error);
     throw error;
   }

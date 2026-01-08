@@ -108,35 +108,13 @@ export const addPipelineMember = async (
   const supabase = getSupabaseClient();
   const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
   
-  // #region agent log
-  const { data: { user: currentUser } } = await supabase.auth.getUser();
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:102',message:'addPipelineMember entry',data:{pipelineId:numericId,userId:userId,role:role,invitationStatus:invitationStatus,currentUserId:currentUser?.id,isNumeric:!isNaN(numericId)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-  
-  // #region agent log
-  const { data: userRoleData } = await supabase.from('users').select('role').eq('id', currentUser?.id).single();
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:108',message:'addPipelineMember current user role check',data:{currentUserId:currentUser?.id,userRole:userRoleData?.role},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
-  
-  // #region agent log
-  const { data: managerCheck } = await supabase.rpc('is_pipeline_manager', { p_pipeline_id: numericId, p_user_id: currentUser?.id });
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:111',message:'addPipelineMember is_pipeline_manager check',data:{pipelineId:numericId,currentUserId:currentUser?.id,isManager:managerCheck},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
-  
   // Try using the SECURITY DEFINER function first (bypasses RLS)
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:115',message:'addPipelineMember calling RPC',data:{p_pipeline_id:numericId,p_user_id:userId,p_role:role,p_invitation_status:invitationStatus},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   const { error: rpcError, data: rpcData } = await supabase.rpc('add_pipeline_member', {
     p_pipeline_id: numericId,
     p_user_id: userId,
     p_role: role,
     p_invitation_status: invitationStatus,
   });
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:123',message:'addPipelineMember RPC result',data:{hasError:!!rpcError,errorCode:rpcError?.code,errorMessage:rpcError?.message,errorDetails:rpcError?.details,errorHint:rpcError?.hint,rpcData:rpcData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   
   if (!rpcError) {
     // RPC function succeeded
@@ -155,14 +133,7 @@ export const addPipelineMember = async (
     })
     .select();
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:130',message:'addPipelineMember direct insert result',data:{hasError:!!error,errorCode:error?.code,errorMessage:error?.message,hasData:!!data,dataLength:data?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
-
   if (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/3adc1b18-20d3-429f-bd83-86eb44ac7e7a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'users.ts:137',message:'addPipelineMember error',data:{errorCode:error.code,errorMessage:error.message,errorDetails:error.details,errorHint:error.hint},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     throw error;
   }
 };
@@ -202,4 +173,3 @@ export const removePipelineMember = async (pipelineId: string | number, userId: 
 
   if (error) throw error;
 };
-
