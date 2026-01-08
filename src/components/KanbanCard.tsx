@@ -215,7 +215,14 @@ export function KanbanCard({ card, stage, index, onClick, currentUser, onToggleW
           {card.tags && card.tags.length > 0 && (
             <div className="mt-2 flex items-center gap-1 flex-wrap">
               {card.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0.5">
+                <Badge 
+                  key={tag} 
+                  variant={tag === 'Priority' ? 'default' : 'secondary'} 
+                  className={cn(
+                    'text-[10px] px-1.5 py-0.5',
+                    tag === 'Priority' && 'bg-green-600 hover:bg-green-700 text-white border-transparent'
+                  )}
+                >
                   {tag}
                 </Badge>
               ))}
