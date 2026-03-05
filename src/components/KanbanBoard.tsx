@@ -1324,6 +1324,7 @@ export function KanbanBoard() {
                         <KanbanLane
                           lane={lane}
                           cards={lane.cardIds.map(id => boardState.cards[id])}
+                          searchQuery={searchQuery}
                           onCardClick={handleCardClick}
                           onAddCard={handleAddCard}
                           onEditStage={editStageName}

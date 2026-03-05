@@ -8,13 +8,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getStageColorClasses } from '@/lib/pipeline-utils';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface KanbanLaneProps {
   lane: Lane;
   cards: LeadCard[];
+  searchQuery?: string;
   onCardClick: (card: LeadCard) => void;
   onAddCard: (stageId: string) => void;
   onEditStage: (stageId: string, newName: string, newColor?: string) => void;
@@ -28,7 +29,7 @@ interface KanbanLaneProps {
   dragHandleProps?: any;
 }
 
-export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, onDeleteStage, currentUser, onToggleWatch, onAddSection, onEditSection, onDeleteSection, onReorderSections, dragHandleProps }: KanbanLaneProps) {
+export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, onEditStage, onDeleteStage, currentUser, onToggleWatch, onAddSection, onEditSection, onDeleteSection, onReorderSections, dragHandleProps }: KanbanLaneProps) {
   const stageColors = getStageColorClasses(lane.stage.id, lane.stage.color as any);
   const [editingOpen, setEditingOpen] = useState(false);
   const [stageName, setStageName] = useState(lane.stage.name);
@@ -43,6 +44,28 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, o
   const [editingSectionColor, setEditingSectionColor] = useState<'stage-new' | 'stage-called' | 'stage-onboard' | 'stage-live' | 'stage-lost' | 'stage-purple' | 'stage-teal' | 'stage-indigo' | 'stage-pink' | 'stage-orange'>('stage-new');
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   
+  // Auto-expand sections that have matching cards when searching
+  useEffect(() => {
+    const query = (searchQuery || '').trim();
+
+    // When there's no active search, keep sections collapsed by default
+    if (!query) {
+      setExpandedSections(new Set());
+      return;
+    }
+
+    const next = new Set<string>();
+    if (lane.sections && lane.sections.length > 0) {
+      lane.sections.forEach(sec => {
+        const hasCardsInSection = cards.some(c => c.sectionId === sec.id);
+        if (hasCardsInSection) {
+          next.add(sec.id);
+        }
+      });
+    }
+    setExpandedSections(next);
+  }, [searchQuery, lane.sections, cards]);
+
   // Remove duplicate cards by ID to prevent React key warnings
   const uniqueCards = cards.filter((card, index, self) => 
     index === self.findIndex(c => c.id === card.id)
@@ -76,11 +99,11 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, o
             </div>
           )}
           <div className="flex flex-col gap-1 flex-1">
-            <div className="flex items-center gap-3">
-              <div className={cn('w-3 h-3 rounded-full', stageColors.bg)} />
-              <h2 className="font-semibold text-foreground">{lane.stage.name}</h2>
-            </div>
-            <div className="text-xs text-muted-foreground">Value: {formattedTotal}</div>
+          <div className="flex items-center gap-3">
+            <div className={cn('w-3 h-3 rounded-full', stageColors.bg)} />
+            <h2 className="font-semibold text-foreground">{lane.stage.name}</h2>
+          </div>
+          <div className="text-xs text-muted-foreground">Value: {formattedTotal}</div>
           </div>
         </div>
         <DropdownMenu>
@@ -116,7 +139,7 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, o
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground">Column name</label>
-              <Input value={stageName} onChange={(e) => setStageName(e.target.value)} />
+          <Input value={stageName} onChange={(e) => setStageName(e.target.value)} />
             </div>
             <div>
               <label className="text-xs text-muted-foreground">Column color</label>
@@ -440,7 +463,7 @@ export function KanbanLane({ lane, cards, onCardClick, onAddCard, onEditStage, o
             <Plus className="w-4 h-4 mr-2" />
             Add a card
           </Button>
-            </div>
+        </div>
           )}
         </Droppable>
       )}

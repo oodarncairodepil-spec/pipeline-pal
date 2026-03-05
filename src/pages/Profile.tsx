@@ -125,7 +125,7 @@ export default function Profile() {
           <Button onClick={async () => {
             try {
               await setCurrentUser({ id: initial.id, name, email, avatar, role: initial.role });
-              navigate(`/pipeline/default`);
+            navigate(`/pipeline/default`);
             } catch (error) {
               console.error('Error saving profile:', error);
               alert('Failed to save profile. Please try again.');
