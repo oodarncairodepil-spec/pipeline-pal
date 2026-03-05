@@ -1169,13 +1169,20 @@ export function KanbanBoard() {
     }
   }, [pipelineId, pipelineIdNum]);
 
-  // Filter cards based on search
+  // Filter cards based on search (by client name or phone number)
   const filteredLanes = boardState.lanes.map(lane => ({
     ...lane,
     cardIds: lane.cardIds.filter(cardId => {
       const card = boardState.cards[cardId];
       if (!card) return false;
-      return card.clientName.toLowerCase().includes(searchQuery.toLowerCase());
+
+      const query = searchQuery.trim().toLowerCase();
+      if (!query) return true;
+
+      const name = (card.clientName || '').toLowerCase();
+      const phone = (card.phone || '').toString().toLowerCase();
+
+      return name.includes(query) || phone.includes(query);
     }),
   }));
 
