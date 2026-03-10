@@ -23,7 +23,7 @@ import { getTags, setTags, getPipelineActivityPhases, pushNotificationForUser } 
 import { useParams, useLocation } from 'react-router-dom';
 import { getSubscriptionTiers } from '@/lib/settings';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import * as dbCards from '@/lib/db/cards';
 
 interface CardDetailPanelProps {
@@ -150,6 +150,66 @@ export function CardDetailPanel({
   const location = useLocation();
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [focusEventId, setFocusEventId] = useState<string | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<{ id: string; name: string; body: string }[]>([]);
+
+  const getWhatsAppUrl = (phone?: string, text?: string) => {
+    if (!phone) return null;
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) return null;
+    const base = `https://wa.me/${digits}`;
+    if (!text) return base;
+    const encoded = encodeURIComponent(text);
+    return `${base}?text=${encoded}`;
+  };
+
+  const loadTemplates = async (): Promise<{ id: string; name: string; body: string }[]> => {
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    try {
+      const { getCurrentAuthUser } = await import('@/lib/auth');
+      const user = await getCurrentAuthUser();
+      if (!user) {
+        setTemplates([]);
+        return [];
+      }
+      const { getTemplatesForUser } = await import('@/lib/db/templates');
+      const data = await getTemplatesForUser(user.id);
+      const list = data.map(t => ({ id: t.id, name: t.name, body: t.body }));
+      setTemplates(list);
+      return list;
+    } catch (e: any) {
+      console.error('Error loading templates', e);
+      setTemplatesError(e?.message || 'Failed to load templates');
+      return [];
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const openWhatsAppWithTemplate = async () => {
+    if (!card.phone) return;
+    const list = await loadTemplates();
+    if (!list.length) {
+      const url = getWhatsAppUrl(card.phone);
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
+    setTemplatesOpen(true);
+  };
+
+  const applyTemplate = (body: string) => {
+    const text = body.replace(/{{clientName}}/g, card.clientName || '');
+    const url = getWhatsAppUrl(card.phone, text);
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+    setTemplatesOpen(false);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -475,7 +535,25 @@ export function CardDetailPanel({
                   </div>
                   <div>
                     <label className="text-xs text-muted-foreground">Phone</label>
-                    <Input value={card.phone || ''} onChange={e => onUpdate(card.id, { phone: e.target.value || undefined })} />
+                    <div className="flex items-center gap-1">
+                      <Input
+                        value={card.phone || ''}
+                        onChange={e => onUpdate(card.id, { phone: e.target.value || undefined })}
+                      />
+                      {card.phone && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openWhatsAppWithTemplate();
+                          }}
+                          className="flex items-center justify-center w-10 h-10 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                          title="Open WhatsApp chat"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -670,6 +748,48 @@ export function CardDetailPanel({
                     </div>
                   </div>
                 )}
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={templatesOpen} onOpenChange={setTemplatesOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Select message template</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  {templatesLoading && (
+                    <div className="text-sm text-muted-foreground">Loading templates...</div>
+                  )}
+                  {templatesError && (
+                    <div className="text-sm text-destructive">{templatesError}</div>
+                  )}
+                  {!templatesLoading && !templatesError && templates.length === 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      You don&apos;t have any templates yet. Go to <strong>Templates</strong> from the menu to create one.
+                    </div>
+                  )}
+                  {!templatesLoading && templates.length > 0 && (
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
+                      {templates.map(t => (
+                        <button
+                          key={t.id}
+                          className="w-full text-left border rounded-md p-2 hover:bg-muted/60 text-sm space-y-1"
+                          onClick={() => applyTemplate(t.body)}
+                        >
+                          <div className="font-medium text-foreground">{t.name}</div>
+                          <div className="text-xs text-muted-foreground whitespace-pre-line line-clamp-3">
+                            {t.body}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setTemplatesOpen(false)}>
+                    Cancel
+                  </Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
 

@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
 import Login from "./pages/Login";
+import Templates from "./pages/Templates";
 import { getCurrentAuthUser } from "./lib/auth";
 
 const queryClient = new QueryClient();
@@ -178,6 +179,14 @@ const App = () => (
                 element={
                   <ProtectedRoute>
                     <Notifications />
+                  </ProtectedRoute>
+                } 
+              />
+              <Route 
+                path="/templates" 
+                element={
+                  <ProtectedRoute>
+                    <Templates />
                   </ProtectedRoute>
                 } 
               />

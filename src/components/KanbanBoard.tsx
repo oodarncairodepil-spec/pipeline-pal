@@ -1251,6 +1251,7 @@ export function KanbanBoard() {
                   <DropdownMenuItem onClick={() => navigate(`/notifications`)}>
                     Notifications
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate(`/templates`)}>Templates</DropdownMenuItem>
                   <DropdownMenuItem onClick={async () => {
                     try {
                       await signOut();
