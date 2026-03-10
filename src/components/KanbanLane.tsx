@@ -70,9 +70,24 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
   const uniqueCards = cards.filter((card, index, self) => 
     index === self.findIndex(c => c.id === card.id)
   );
+
+  const getCreatedAt = (card: LeadCard): Date => {
+    const createdEvent = card.history?.find(h => h.type === 'card_created');
+    return createdEvent?.timestamp || card.startDate;
+  };
+
+  const unsectionedCards = uniqueCards
+    .filter(c => !c.sectionId)
+    .sort((a, b) => getCreatedAt(a).getTime() - getCreatedAt(b).getTime());
+
+  const unsectionedCount = unsectionedCards.length;
   
+  const formatRupiah = (value: number) =>
+    new Intl.NumberFormat('id-ID').format(value);
+
   const totalDeal = uniqueCards.reduce((sum, c) => sum + (c.dealValue || 0), 0);
   const formattedTotal = totalDeal.toLocaleString();
+  const isLiveColumn = lane.stage.id === 'live' || lane.stage.name.toLowerCase() === 'live';
 
   return (
     <motion.div
@@ -99,11 +114,13 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
             </div>
           )}
           <div className="flex flex-col gap-1 flex-1">
-          <div className="flex items-center gap-3">
-            <div className={cn('w-3 h-3 rounded-full', stageColors.bg)} />
-            <h2 className="font-semibold text-foreground">{lane.stage.name}</h2>
-          </div>
-          <div className="text-xs text-muted-foreground">Value: {formattedTotal}</div>
+            <div className="flex items-center gap-3">
+              <div className={cn('w-3 h-3 rounded-full', stageColors.bg)} />
+              <h2 className="font-semibold text-foreground">{lane.stage.name}</h2>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Value: {formattedTotal}
+            </div>
           </div>
         </div>
         <DropdownMenu>
@@ -260,7 +277,9 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
                 snapshot.isDraggingOver && 'bg-accent/50 ring-2 ring-primary/20'
               )}
             >
-              {uniqueCards.map((card, index) => (
+              {[...uniqueCards]
+                .sort((a, b) => getCreatedAt(a).getTime() - getCreatedAt(b).getTime())
+                .map((card, index) => (
                 <KanbanCard
                   key={card.id}
                   card={card}
@@ -299,6 +318,7 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
               {lane.sections?.map((sec, sectionIndex) => {
                 const colors = getStageColorClasses('new', sec.color as any);
                 const sectionCards = uniqueCards.filter(c => c.sectionId === sec.id);
+                const sectionTotal = sectionCards.reduce((sum, c) => sum + (c.dealValue || 0), 0);
                 return (
                   <Draggable key={sec.id} draggableId={`section-${lane.id}-${sec.id}`} index={sectionIndex} type="SECTION">
                     {(sectionProvided, sectionSnapshot) => (
@@ -356,7 +376,11 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
                                 </button>
                                 <div className={cn('w-3 h-3 rounded-full', colors.bg)} />
                                 <span className="text-xs font-medium">{sec.name}</span>
-                                <span className="text-[10px] text-muted-foreground">({sectionCards.length})</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {isLiveColumn
+                                    ? `(${sectionCards.length}) Rp. ${formatRupiah(sectionTotal)}`
+                                    : `(${sectionCards.length})`}
+                                </span>
                               </div>
                               <div className="flex items-center gap-1">
                                 {onEditSection && (
@@ -430,7 +454,9 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
 
           {/* Unsectioned container */}
           <div className="rounded-lg border border-border/50 bg-card/60">
-            <div className="px-3 py-2 text-xs text-muted-foreground">No Section</div>
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              No Section{` (${unsectionedCount})`}
+            </div>
             <Droppable droppableId={lane.id}>
               {(provided, snapshot) => (
                 <div
@@ -438,7 +464,7 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
                   {...provided.droppableProps}
                   className={cn('p-2 space-y-3 rounded-b-lg', snapshot.isDraggingOver && 'bg-accent/50 ring-2 ring-primary/20')}
                 >
-                  {uniqueCards.filter(c => !c.sectionId).map((card, index) => (
+                  {unsectionedCards.map((card, index) => (
                     <KanbanCard
                       key={card.id}
                       card={card}
