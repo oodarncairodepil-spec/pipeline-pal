@@ -279,6 +279,9 @@ const Templates = () => {
                     rows={6}
                     placeholder="Hi {{clientName}}, ..."
                   />
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Emoji and emoticons are supported.
+                  </p>
                 </div>
               </div>
               <DialogFooter>
