@@ -24,6 +24,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { getSubscriptionTiers } from '@/lib/settings';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import * as emoji from 'node-emoji';
 import * as dbCards from '@/lib/db/cards';
 
 interface CardDetailPanelProps {
@@ -161,8 +162,8 @@ export function CardDetailPanel({
     if (!digits) return null;
     const base = `https://wa.me/${digits}`;
     if (!text) return base;
-    const encoded = encodeURIComponent(text);
-    return `${base}?text=${encoded}`;
+    const normalized = (text || '').normalize('NFC');
+    return `${base}?text=${encodeURIComponent(normalized)}`;
   };
 
   const loadTemplates = async (): Promise<{ id: string; name: string; body: string }[]> => {
@@ -203,7 +204,8 @@ export function CardDetailPanel({
   };
 
   const applyTemplate = (body: string) => {
-    const text = body.replace(/{{clientName}}/g, card.clientName || '');
+    let text = body.replace(/{{clientName}}/g, card.clientName || '');
+    text = emoji.emojify(text);
     const url = getWhatsAppUrl(card.phone, text);
     if (url) {
       window.open(url, '_blank', 'noopener,noreferrer');

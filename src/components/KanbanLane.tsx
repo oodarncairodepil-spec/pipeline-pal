@@ -1,5 +1,4 @@
 import { Droppable, Draggable } from '@hello-pangea/dnd';
-import { motion } from 'framer-motion';
 import { MoreHorizontal, Plus, Trash2, X, GripVertical, Edit2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Lane, LeadCard, Stage } from '@/types/pipeline';
 import { KanbanCard } from './KanbanCard';
@@ -76,8 +75,9 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
     return createdEvent?.timestamp || card.startDate;
   };
 
+  const sectionIdSet = new Set((lane.sections || []).map(s => s.id));
   const unsectionedCards = uniqueCards
-    .filter(c => !c.sectionId)
+    .filter(c => !c.sectionId || !sectionIdSet.has(c.sectionId))
     .sort((a, b) => getCreatedAt(a).getTime() - getCreatedAt(b).getTime());
 
   const unsectionedCount = unsectionedCards.length;
@@ -90,11 +90,7 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
   const isLiveColumn = lane.stage.id === 'live' || lane.stage.name.toLowerCase() === 'live';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      className="flex-shrink-0 w-80"
-    >
+    <div className="flex-shrink-0 w-80">
       {/* Lane Header */}
       <div
         className={cn(
@@ -320,7 +316,7 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
                 const sectionCards = uniqueCards.filter(c => c.sectionId === sec.id);
                 const sectionTotal = sectionCards.reduce((sum, c) => sum + (c.dealValue || 0), 0);
                 return (
-                  <Draggable key={sec.id} draggableId={`section-${lane.id}-${sec.id}`} index={sectionIndex} type="SECTION">
+                  <Draggable key={sec.id} draggableId={`section-${lane.id}-${sec.id}`} index={sectionIndex}>
                     {(sectionProvided, sectionSnapshot) => (
                       <div
                         ref={sectionProvided.innerRef}
@@ -614,6 +610,6 @@ export function KanbanLane({ lane, cards, searchQuery, onCardClick, onAddCard, o
           </DialogContent>
         </Dialog>
       )}
-    </motion.div>
+    </div>
   );
 }

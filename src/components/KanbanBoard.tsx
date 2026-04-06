@@ -60,9 +60,9 @@ export function KanbanBoard() {
   const onDragEnd = useCallback(async (result: DropResult) => {
     const { source, destination, draggableId, type } = result;
 
-    if (!destination || !currentUser) return;
+    if (!destination) return;
 
-    // Handle column (stage) reordering
+    // Column reorder: do not require currentUser (scroll/DnD must still update UI + order in DB when authed)
     if (type === 'COLUMN') {
       if (source.index === destination.index) return;
 
@@ -70,40 +70,34 @@ export function KanbanBoard() {
       const [removed] = newLanes.splice(source.index, 1);
       newLanes.splice(destination.index, 0, removed);
 
-      // Update order for all stages
       const updatedStages = newLanes.map((lane, index) => {
         const stage = boardState.stages.find(s => s.id === lane.stage.id);
         if (!stage) return lane.stage;
         return { ...stage, order: index };
       });
 
-      // Update local state
       setBoardState(prev => ({
         ...prev,
         lanes: newLanes,
         stages: updatedStages,
       }));
 
-      // Save to Supabase
       try {
         const { getCurrentAuthUser } = await import('@/lib/auth');
         const authUser = await getCurrentAuthUser();
-        if (authUser) {
-          const numericId = pipelineIdNum || await dbPipelines.getPipelineIdByName(pipelineId) || 0;
-          if (numericId) {
-            // Update order for all stages
-            for (const stage of updatedStages) {
-              await dbStages.updatePipelineStage(numericId, stage.id, { order: stage.order });
-            }
-            console.log('✅ Column order updated in Supabase successfully');
+        const numericId = pipelineIdNum || (await dbPipelines.getPipelineIdByName(pipelineId)) || 0;
+        if (authUser && numericId) {
+          for (const stage of updatedStages) {
+            await dbStages.updatePipelineStage(numericId, stage.id, { order: stage.order });
           }
         }
       } catch (error) {
         console.error('Error updating column order in Supabase:', error);
-        // Continue even if Supabase update fails - local state is already updated
       }
       return;
     }
+
+    if (!currentUser) return;
 
     // Handle section reordering within a stage
     if (type === 'SECTION') {
@@ -1299,19 +1293,29 @@ export function KanbanBoard() {
         </div>
       ) : (
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex-1 overflow-x-auto overflow-y-hidden p-6">
-          <Droppable droppableId="columns" type="COLUMN" direction="horizontal">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <Droppable
+            droppableId="columns"
+            type="COLUMN"
+            direction="horizontal"
+            ignoreContainerClipping
+          >
             {(provided, snapshot) => (
               <div
                 ref={provided.innerRef}
                 {...provided.droppableProps}
                 className={cn(
-                  "flex gap-5 h-full",
-                  snapshot.isDraggingOver && "bg-accent/10"
+                  'flex flex-1 min-h-0 min-w-0 gap-5 h-full overflow-x-auto overflow-y-hidden p-6',
+                  snapshot.isDraggingOver && 'bg-accent/10'
                 )}
               >
                 {filteredLanes.map((lane, index) => (
-                  <Draggable key={lane.id} draggableId={`column-${lane.id}`} index={index} type="COLUMN">
+                  <Draggable
+                    key={lane.id}
+                    draggableId={`column-${lane.id}`}
+                    index={index}
+                    disableInteractiveElementBlocking
+                  >
                     {(provided, snapshot) => (
                       <div
                         ref={provided.innerRef}
