@@ -144,6 +144,53 @@ export const deletePipelineStage = async (pipelineId: string | number, stageId: 
   if (error) throw error;
 };
 
+export type PipelineSectionRow = { id: string; name: string; color: string; cardIds: string[] };
+
+/** All sections for a pipeline in 2 queries (avoids N requests per stage/section). */
+export const getAllPipelineSectionsGrouped = async (
+  pipelineId: string | number
+): Promise<Record<string, PipelineSectionRow[]>> => {
+  const supabase = getSupabaseClient();
+  const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
+
+  const [{ data: sectionRows, error: secErr }, { data: cardRows, error: cardErr }] = await Promise.all([
+    supabase
+      .from('pipeline_sections')
+      .select('id, name, color, order, stage_id')
+      .eq('pipeline_id', numericId)
+      .order('order', { ascending: true }),
+    supabase
+      .from('cards')
+      .select('id, stage_id, section_id')
+      .eq('pipeline_id', numericId)
+      .not('section_id', 'is', null),
+  ]);
+
+  if (secErr) {
+    console.error('Error fetching pipeline sections (batch):', secErr);
+    return {};
+  }
+  if (cardErr) {
+    console.error('Error fetching cards for sections (batch):', cardErr);
+  }
+
+  const byStage: Record<string, PipelineSectionRow[]> = {};
+  for (const s of sectionRows || []) {
+    const cardIds = (cardRows || [])
+      .filter(c => c.section_id === s.id && c.stage_id === s.stage_id)
+      .map(c => c.id);
+    const entry: PipelineSectionRow = {
+      id: s.id,
+      name: s.name,
+      color: s.color,
+      cardIds,
+    };
+    if (!byStage[s.stage_id]) byStage[s.stage_id] = [];
+    byStage[s.stage_id].push(entry);
+  }
+  return byStage;
+};
+
 // Pipeline sections
 export const getPipelineSections = async (
   pipelineId: string | number,

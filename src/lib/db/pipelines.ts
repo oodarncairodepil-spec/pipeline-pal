@@ -3,31 +3,28 @@ import { PipelineRef } from '../settings';
 
 export const getPipelines = async (): Promise<PipelineRef[]> => {
   const supabase = getSupabaseClient();
-  
-  // Check auth state
-  const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-  
-  // Check user role
-  let userRole = null;
-  if (authUser) {
-    const { data: userData, error: userError } = await supabase.from('users').select('role').eq('id', authUser.id).maybeSingle();
-    userRole = userData?.role;
+
+  // Prefer session (local + fast); avoid extra /auth/v1/user round-trip that can 403 when JWT is stale
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return [];
   }
-  
-  // Try to use the RPC function first (for managers to see all pipelines)
-  const { data: rpcData, error: rpcError } = await supabase
-    .rpc('get_all_pipelines_for_manager');
-  
-  if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
-    // RPC function succeeded, return the data
-    // Handle both old format (id, name) and new format (pipeline_id, pipeline_name)
-    const result = rpcData.map(p => ({ 
-      id: (p.pipeline_id ?? p.id) as number, 
-      name: (p.pipeline_name ?? p.name) as string 
-    }));
-    return result;
+
+  // Optional RPC for managers — often 400 if not deployed / wrong signature; never block listing
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('get_all_pipelines_for_manager');
+    if (!rpcError && rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+      return rpcData.map(p => ({
+        id: (p.pipeline_id ?? p.id) as number,
+        name: (p.pipeline_name ?? p.name) as string,
+      }));
+    }
+  } catch {
+    // RPC missing or failed — use RLS query below
   }
-  
+
   // Fallback to direct query (will respect RLS - only pipelines user is member of)
   const { data, error } = await supabase
     .from('pipelines')

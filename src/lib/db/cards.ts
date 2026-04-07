@@ -1,14 +1,73 @@
 import { getSupabaseClient } from '../supabase';
-import { LeadCard, Note, HistoryEvent, FileAttachment } from '@/types/pipeline';
+import { LeadCard, Note, HistoryEvent, FileAttachment, TeamMember } from '@/types/pipeline';
+
+const IN_CHUNK = 100;
+
+function chunkIds<T extends string>(ids: T[]): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    chunks.push(ids.slice(i, i + IN_CHUNK));
+  }
+  return chunks;
+}
+
+/** PostgREST `.in()` with very large arrays hurts URL size and DB plans; chunk fetches. */
+async function selectInChunks(
+  table: string,
+  columns: string,
+  fkColumn: string,
+  ids: string[]
+): Promise<Record<string, unknown>[]> {
+  if (ids.length === 0) return [];
+  const supabase = getSupabaseClient();
+  const out: Record<string, unknown>[] = [];
+  for (const chunk of chunkIds(ids)) {
+    const { data, error } = await supabase.from(table).select(columns).in(fkColumn, chunk);
+    if (error) {
+      console.error(`Error fetching ${table} (chunk):`, error);
+      continue;
+    }
+    if (data?.length) out.push(...data);
+  }
+  return out;
+}
+
+function bucketByCardId<T extends { card_id: string }>(rows: T[]): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const row of rows) {
+    const list = m.get(row.card_id);
+    if (list) list.push(row);
+    else m.set(row.card_id, [row]);
+  }
+  return m;
+}
+
+const CARD_COLUMNS =
+  'id, pipeline_id, stage_id, section_id, client_name, phone, instagram, tiktok, tokopedia, shopee, subscription_tier, deal_value, live_url, instagram_followers, tiktok_followers, tokopedia_followers, shopee_followers, activity_phase, assigned_to, start_date, live_date_target, created_at';
+
+function rowToTeamMember(u: {
+  id: string;
+  name: string;
+  avatar?: string | null;
+  role: string;
+  email?: string | null;
+}): TeamMember {
+  return {
+    id: u.id,
+    name: u.name,
+    avatar: u.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(u.name)}&backgroundColor=b6e3f4`,
+    role: u.role as TeamMember['role'],
+    email: u.email || undefined,
+  };
+}
 
 export const getCards = async (pipelineId: string | number): Promise<Record<string, LeadCard>> => {
   const supabase = getSupabaseClient();
   const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
-  
-  // Fetch cards
+
   const { data: cardsData, error: cardsError } = await supabase
     .from('cards')
-    .select('*')
+    .select(CARD_COLUMNS)
     .eq('pipeline_id', numericId)
     .order('created_at', { ascending: false });
 
@@ -21,59 +80,81 @@ export const getCards = async (pipelineId: string | number): Promise<Record<stri
     return {};
   }
 
-  // Fetch related data in parallel
-  const cardIds = cardsData.map(c => c.id);
-  
-  const [notesData, historyData, filesData, watchersData, collaboratorsData, tagsData] = await Promise.all([
-    supabase.from('card_notes').select('*').in('card_id', cardIds),
-    supabase.from('card_history').select('*').in('card_id', cardIds),
-    supabase.from('card_files').select('*').in('card_id', cardIds),
-    supabase.from('card_watchers').select('*').in('card_id', cardIds),
-    supabase.from('card_collaborators').select('*').in('card_id', cardIds),
-    supabase.from('card_tags').select('card_id, tag_id').in('card_id', cardIds),
+  const cardIds = cardsData.map(c => c.id as string);
+
+  const [notesRows, historyRows, filesRows, watchersRows, collaboratorsRows, tagsJunctionRows] = await Promise.all([
+    selectInChunks('card_notes', 'id, card_id, content, created_at, created_by', 'card_id', cardIds),
+    selectInChunks('card_history', 'id, card_id, event_type, timestamp, user_id, details', 'card_id', cardIds),
+    selectInChunks('card_files', 'id, card_id, name, url, type, size, uploaded_at, uploaded_by', 'card_id', cardIds),
+    selectInChunks('card_watchers', 'card_id, user_id', 'card_id', cardIds),
+    selectInChunks('card_collaborators', 'card_id, user_id', 'card_id', cardIds),
+    selectInChunks('card_tags', 'card_id, tag_id', 'card_id', cardIds),
   ]);
 
-  // Fetch users for assigned_to, notes, history, files
+  const notesByCard = bucketByCardId(notesRows as { card_id: string; id: string; content: string; created_at: string; created_by: string }[]);
+  const historyByCard = bucketByCardId(historyRows as { card_id: string; id: string; event_type: string; timestamp: string; user_id: string; details: Record<string, unknown> }[]);
+  const filesByCard = bucketByCardId(filesRows as { card_id: string; id: string; name: string; url: string; type: string; size: number; uploaded_at: string; uploaded_by: string }[]);
+  const watchersByCard = bucketByCardId(watchersRows as { card_id: string; user_id: string }[]);
+  const collaboratorsByCard = bucketByCardId(collaboratorsRows as { card_id: string; user_id: string }[]);
+
   const userIds = new Set<string>();
-  cardsData.forEach(c => c.assigned_to && userIds.add(c.assigned_to));
-  notesData.data?.forEach(n => userIds.add(n.created_by));
-  historyData.data?.forEach(h => userIds.add(h.user_id));
-  filesData.data?.forEach(f => userIds.add(f.uploaded_by));
-  watchersData.data?.forEach(w => userIds.add(w.user_id));
-  collaboratorsData.data?.forEach(c => userIds.add(c.user_id));
+  for (const c of cardsData) {
+    if (c.assigned_to) userIds.add(c.assigned_to as string);
+  }
+  for (const n of notesRows) userIds.add((n as { created_by: string }).created_by);
+  for (const h of historyRows) userIds.add((h as { user_id: string }).user_id);
+  for (const f of filesRows) userIds.add((f as { uploaded_by: string }).uploaded_by);
+  for (const w of watchersRows) userIds.add((w as { user_id: string }).user_id);
+  for (const co of collaboratorsRows) userIds.add((co as { user_id: string }).user_id);
 
-  const { data: usersData } = await supabase
-    .from('users')
-    .select('*')
-    .in('id', Array.from(userIds));
-
-  const usersMap = new Map((usersData || []).map(u => [u.id, u]));
-
-  // Fetch tags
-  const tagIds = new Set((tagsData.data || []).map(t => t.tag_id));
-  const { data: tagsDataFull } = await supabase
-    .from('tags')
-    .select('*')
-    .in('id', Array.from(tagIds));
-
-  const tagsMap = new Map((tagsDataFull || []).map(t => [t.id, t.name]));
-  const cardTagsMap = new Map<string, string[]>();
-  (tagsData.data || []).forEach(ct => {
-    const tagName = tagsMap.get(ct.tag_id);
-    if (tagName) {
-      if (!cardTagsMap.has(ct.card_id)) {
-        cardTagsMap.set(ct.card_id, []);
-      }
-      cardTagsMap.get(ct.card_id)!.push(tagName);
+  const usersMap = new Map<string, TeamMember>();
+  const uidList = Array.from(userIds);
+  for (const chunk of chunkIds(uidList)) {
+    if (chunk.length === 0) continue;
+    const { data: usersData, error: usersError } = await supabase
+      .from('users')
+      .select('id, name, avatar, role, email')
+      .in('id', chunk);
+    if (usersError) {
+      console.error('Error fetching users (chunk):', usersError);
+      continue;
     }
-  });
+    for (const u of usersData || []) {
+      usersMap.set(u.id, rowToTeamMember(u));
+    }
+  }
 
-  // Build cards object
+  const tagIds = new Set((tagsJunctionRows as { tag_id: string }[]).map(t => t.tag_id));
+  const tagsMap = new Map<string, string>();
+  const tagIdList = Array.from(tagIds);
+  for (const chunk of chunkIds(tagIdList)) {
+    if (chunk.length === 0) continue;
+    const { data: tagsDataFull, error: tagsErr } = await supabase.from('tags').select('id, name').in('id', chunk);
+    if (tagsErr) {
+      console.error('Error fetching tags (chunk):', tagsErr);
+      continue;
+    }
+    for (const t of tagsDataFull || []) {
+      tagsMap.set(t.id, t.name);
+    }
+  }
+
+  const cardTagsMap = new Map<string, string[]>();
+  for (const ct of tagsJunctionRows as { card_id: string; tag_id: string }[]) {
+    const tagName = tagsMap.get(ct.tag_id);
+    if (!tagName) continue;
+    const list = cardTagsMap.get(ct.card_id);
+    if (list) list.push(tagName);
+    else cardTagsMap.set(ct.card_id, [tagName]);
+  }
+
   const cards: Record<string, LeadCard> = {};
 
   for (const card of cardsData) {
-    const notes: Note[] = (notesData.data || [])
-      .filter(n => n.card_id === card.id)
+    const id = card.id as string;
+
+    const notes: Note[] = (notesByCard.get(id) || [])
+      .filter(n => usersMap.has(n.created_by))
       .map(n => ({
         id: n.id,
         content: n.content,
@@ -81,18 +162,18 @@ export const getCards = async (pipelineId: string | number): Promise<Record<stri
         createdBy: usersMap.get(n.created_by)!,
       }));
 
-    const history: HistoryEvent[] = (historyData.data || [])
-      .filter(h => h.card_id === card.id)
+    const history: HistoryEvent[] = (historyByCard.get(id) || [])
+      .filter(h => usersMap.has(h.user_id))
       .map(h => ({
         id: h.id,
         type: h.event_type as HistoryEvent['type'],
         timestamp: new Date(h.timestamp),
         user: usersMap.get(h.user_id)!,
-        details: h.details || {},
+        details: (h.details || {}) as HistoryEvent['details'],
       }));
 
-    const files: FileAttachment[] = (filesData.data || [])
-      .filter(f => f.card_id === card.id)
+    const files: FileAttachment[] = (filesByCard.get(id) || [])
+      .filter(f => usersMap.has(f.uploaded_by))
       .map(f => ({
         id: f.id,
         name: f.name,
@@ -103,38 +184,35 @@ export const getCards = async (pipelineId: string | number): Promise<Record<stri
         uploadedBy: usersMap.get(f.uploaded_by)!,
       }));
 
-    const watchers = (watchersData.data || [])
-      .filter(w => w.card_id === card.id)
-      .map(w => w.user_id);
+    const watchers = (watchersByCard.get(id) || []).map(w => w.user_id);
 
-    const collaborators = (collaboratorsData.data || [])
-      .filter(c => c.card_id === card.id)
-      .map(c => usersMap.get(c.user_id)!)
-      .filter(Boolean);
+    const collaborators = (collaboratorsByCard.get(id) || [])
+      .map(c => usersMap.get(c.user_id))
+      .filter((m): m is TeamMember => !!m);
 
-    cards[card.id] = {
-      id: card.id,
-      clientName: card.client_name,
-      phone: card.phone || undefined,
-      instagram: card.instagram || undefined,
-      tiktok: card.tiktok || undefined,
-      tokopedia: card.tokopedia || undefined,
-      shopee: card.shopee || undefined,
-      subscriptionTier: card.subscription_tier || 'Basic',
+    cards[id] = {
+      id,
+      clientName: card.client_name as string,
+      phone: (card.phone as string) || undefined,
+      instagram: (card.instagram as string) || undefined,
+      tiktok: (card.tiktok as string) || undefined,
+      tokopedia: (card.tokopedia as string) || undefined,
+      shopee: (card.shopee as string) || undefined,
+      subscriptionTier: (card.subscription_tier as string) || 'Basic',
       dealValue: Number(card.deal_value) || 0,
-      liveUrl: card.live_url || undefined,
-      instagramFollowers: card.instagram_followers || undefined,
-      tiktokFollowers: card.tiktok_followers || undefined,
-      tokopediaFollowers: card.tokopedia_followers || undefined,
-      shopeeFollowers: card.shopee_followers || undefined,
-      startDate: new Date(card.start_date),
-      liveDateTarget: card.live_date_target ? new Date(card.live_date_target) : undefined,
-      stageId: card.stage_id,
-      sectionId: card.section_id || undefined,
-      assignedTo: card.assigned_to ? usersMap.get(card.assigned_to) : undefined,
+      liveUrl: (card.live_url as string) || undefined,
+      instagramFollowers: (card.instagram_followers as number) || undefined,
+      tiktokFollowers: (card.tiktok_followers as number) || undefined,
+      tokopediaFollowers: (card.tokopedia_followers as number) || undefined,
+      shopeeFollowers: (card.shopee_followers as number) || undefined,
+      startDate: new Date(card.start_date as string),
+      liveDateTarget: card.live_date_target ? new Date(card.live_date_target as string) : undefined,
+      stageId: card.stage_id as string,
+      sectionId: (card.section_id as string) || undefined,
+      assignedTo: card.assigned_to ? usersMap.get(card.assigned_to as string) : undefined,
       collaborators,
-      activityPhase: card.activity_phase || undefined,
-      tags: cardTagsMap.get(card.id) || [],
+      activityPhase: (card.activity_phase as string) || undefined,
+      tags: cardTagsMap.get(id) || [],
       notes,
       history,
       files,
@@ -597,24 +675,44 @@ export const addCardFile = async (
   if (error) throw error;
 };
 
+/** Client names for autocomplete scoped to one pipeline (smaller payload than all pipelines). */
+export const getClientNamesForPipeline = async (pipelineId: string | number): Promise<string[]> => {
+  const supabase = getSupabaseClient();
+  const numericId = typeof pipelineId === 'number' ? pipelineId : Number(pipelineId);
+  const { data, error } = await supabase
+    .from('cards')
+    .select('client_name')
+    .eq('pipeline_id', numericId)
+    .not('client_name', 'is', null)
+    .neq('client_name', '')
+    .order('client_name', { ascending: true })
+    .limit(8000);
+
+  if (error) {
+    console.error('Error fetching client names for pipeline:', error);
+    return [];
+  }
+
+  const uniqueNames = Array.from(new Set((data || []).map(c => c.client_name).filter(Boolean)));
+  return uniqueNames.sort();
+};
+
+/** All accessible client names (capped) — prefer getClientNamesForPipeline on board load. */
 export const getAllClientNames = async (): Promise<string[]> => {
   const supabase = getSupabaseClient();
-  
-  // Fetch all unique client names from all pipelines the user has access to
-  // Using DISTINCT ON to get unique client names
   const { data, error } = await supabase
     .from('cards')
     .select('client_name')
     .not('client_name', 'is', null)
     .neq('client_name', '')
-    .order('client_name', { ascending: true });
+    .order('client_name', { ascending: true })
+    .limit(10000);
 
   if (error) {
     console.error('Error fetching client names:', error);
     return [];
   }
 
-  // Extract unique client names
   const uniqueNames = Array.from(new Set((data || []).map(c => c.client_name).filter(Boolean)));
   return uniqueNames.sort();
 };

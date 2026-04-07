@@ -5,7 +5,11 @@ import * as dbStages from '@/lib/db/stages';
 import * as dbUsers from '@/lib/db/users';
 import * as dbPipelines from '@/lib/db/pipelines';
 
-export const loadInitialBoardState = async (pipelineName: string = 'default'): Promise<BoardState> => {
+export const loadInitialBoardState = async (
+  pipelineName: string = 'default',
+  /** When set (e.g. from KanbanBoard after getPipelineByName), skips duplicate pipeline lookup. */
+  knownPipelineNumericId?: number | null
+): Promise<BoardState> => {
   try {
     // Check if user is authenticated before trying to create pipelines
     const { getCurrentAuthUser } = await import('../lib/auth');
@@ -16,16 +20,16 @@ export const loadInitialBoardState = async (pipelineName: string = 'default'): P
     } catch {}
 
     // Convert pipeline name (slug) to numeric ID
-    let pipelineIdNum: number | null = null;
-    if (isAuthenticated) {
+    let pipelineIdNum: number | null =
+      knownPipelineNumericId != null && Number.isFinite(knownPipelineNumericId)
+        ? knownPipelineNumericId
+        : null;
+    if (isAuthenticated && pipelineIdNum == null) {
       try {
-        // Check if pipeline exists by name
         const pipeline = await dbPipelines.getPipelineByName(pipelineName);
         if (pipeline) {
           pipelineIdNum = pipeline.id;
         } else {
-          // Pipeline doesn't exist - don't create automatically
-          // Return empty state instead
           console.warn(`Pipeline "${pipelineName}" not found. Returning empty state.`);
         }
       } catch (error) {
@@ -140,17 +144,18 @@ export const loadInitialBoardState = async (pipelineName: string = 'default'): P
       };
     });
 
-    // Load sections for each lane
-    if (pipelineIdNum) {
-      for (const lane of lanes) {
-        try {
-          const sections = await dbStages.getPipelineSections(pipelineIdNum, lane.id);
-          if (sections.length > 0) {
+    // Sections: one batched fetch for the whole pipeline (2 queries vs N per stage)
+    if (pipelineIdNum && lanes.length > 0) {
+      try {
+        const sectionsByStage = await dbStages.getAllPipelineSectionsGrouped(pipelineIdNum);
+        for (const lane of lanes) {
+          const sections = sectionsByStage[lane.id];
+          if (sections?.length) {
             lane.sections = sections;
           }
-        } catch (error) {
-          console.error(`Error loading sections for stage ${lane.id}:`, error);
         }
+      } catch (error) {
+        console.error('Error loading pipeline sections (batch):', error);
       }
     }
 

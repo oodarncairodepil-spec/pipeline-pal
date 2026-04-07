@@ -796,7 +796,7 @@ export function KanbanBoard() {
 
   // Load initial board state
   useEffect(() => {
-    const PIPELINE_LOAD_TIMEOUT_MS = 35_000;
+    let cancelled = false;
     const emptyBoard: BoardState = { lanes: [], cards: {}, stages: [], teamMembers: [] };
     const offlineUser: TeamMember = {
       id: 'alex',
@@ -806,12 +806,32 @@ export function KanbanBoard() {
       email: 'alex@example.com',
     };
 
+    /** Caps one async step so a hung Supabase call cannot block the whole board forever */
+    const withTimeout = async <T,>(label: string, ms: number, p: Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await Promise.race([
+          p,
+          new Promise<T>((_, reject) => {
+            setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+          }),
+        ]);
+      } catch (e) {
+        console.warn(`[pipeline load] ${label}:`, e);
+        return fallback;
+      }
+    };
+
     const loadData = async () => {
       setLoading(true);
       try {
         let numericId: number | null = null;
         try {
-          const pipeline = await dbPipelines.getPipelineByName(pipelineId);
+          const pipeline = await withTimeout(
+            'getPipelineByName',
+            20_000,
+            dbPipelines.getPipelineByName(pipelineId),
+            null
+          );
           if (pipeline) {
             numericId = pipeline.id;
             setPipelineIdNum(pipeline.id);
@@ -820,41 +840,39 @@ export function KanbanBoard() {
           console.error('Error getting pipeline ID:', error);
         }
 
-        const loadAll = Promise.all([
-          loadInitialBoardState(pipelineId),
-          getCurrentUser(),
-          getPipelines(),
-          dbCards.getAllClientNames(),
+        // Core batch: board + user + pipelines (client names deferred — scoped query, does not block first paint)
+        const [boardData, user, pipelineList] = await Promise.all([
+          withTimeout('loadInitialBoardState', 120_000, loadInitialBoardState(pipelineId, numericId), emptyBoard),
+          withTimeout('getCurrentUser', 25_000, getCurrentUser(), offlineUser),
+          withTimeout('getPipelines', 25_000, getPipelines(), []),
         ]);
 
-        let boardData: BoardState;
-        let user: TeamMember;
-        let pipelineList: Awaited<ReturnType<typeof getPipelines>>;
-        let clientNames: string[];
-
-        try {
-          [boardData, user, pipelineList, clientNames] = await Promise.race([
-            loadAll,
-            new Promise<never>((_, reject) => {
-              setTimeout(
-                () => reject(new Error(`Pipeline load timed out after ${PIPELINE_LOAD_TIMEOUT_MS}ms`)),
-                PIPELINE_LOAD_TIMEOUT_MS
-              );
-            }),
-          ]);
-        } catch (batchError) {
-          console.error('Error loading board data (batch):', batchError);
-          setBoardState(emptyBoard);
-          setCurrentUser(offlineUser);
-          setPipelines([]);
-          setAllClientNames([]);
-          return;
-        }
+        if (cancelled) return;
 
         setBoardState(boardData);
         setCurrentUser(user);
         setPipelines(pipelineList);
-        setAllClientNames(clientNames);
+
+        let effectivePipelineId = numericId;
+        if (effectivePipelineId == null && pipelineList.length > 0) {
+          const found = pipelineList.find(p => p.name === pipelineId);
+          if (found) effectivePipelineId = found.id;
+        }
+
+        const pidForClientNames = effectivePipelineId;
+        void (async () => {
+          if (pidForClientNames != null) {
+            const names = await withTimeout(
+              'getClientNamesForPipeline',
+              25_000,
+              dbCards.getClientNamesForPipeline(pidForClientNames),
+              []
+            );
+            if (!cancelled) setAllClientNames(names);
+          } else if (!cancelled) {
+            setAllClientNames([]);
+          }
+        })();
 
         if (!numericId && pipelineList.length > 0) {
           const found = pipelineList.find(p => p.name === pipelineId);
@@ -873,15 +891,20 @@ export function KanbanBoard() {
         }
       } catch (error) {
         console.error('Error loading board data:', error);
-        setBoardState(emptyBoard);
-        setCurrentUser(offlineUser);
-        setPipelines([]);
-        setAllClientNames([]);
+        if (!cancelled) {
+          setBoardState(emptyBoard);
+          setCurrentUser(offlineUser);
+          setPipelines([]);
+          setAllClientNames([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
     loadData();
+    return () => {
+      cancelled = true;
+    };
   }, [pipelineId]);
 
   // Update unread count periodically
