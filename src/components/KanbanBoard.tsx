@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { DragDropContext, DropResult, Draggable, Droppable } from '@hello-pangea/dnd';
 import { motion } from 'framer-motion';
 import { Search, Filter, Columns, Plus } from 'lucide-react';
-import { BoardState, LeadCard, StageId } from '@/types/pipeline';
+import { BoardState, LeadCard, StageId, TeamMember } from '@/types/pipeline';
 import { loadInitialBoardState } from '@/data/mockData';
 import { setPipelineStages, getPipelines, setPipelines, pushNotificationForUser, getCurrentUser, getUnreadNotificationCount } from '@/lib/settings';
 import { KanbanLane } from './KanbanLane';
@@ -796,10 +796,19 @@ export function KanbanBoard() {
 
   // Load initial board state
   useEffect(() => {
+    const PIPELINE_LOAD_TIMEOUT_MS = 35_000;
+    const emptyBoard: BoardState = { lanes: [], cards: {}, stages: [], teamMembers: [] };
+    const offlineUser: TeamMember = {
+      id: 'alex',
+      name: 'Alex',
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4',
+      role: 'manager',
+      email: 'alex@example.com',
+    };
+
     const loadData = async () => {
       setLoading(true);
       try {
-        // Get numeric pipeline ID from name (slug)
         let numericId: number | null = null;
         try {
           const pipeline = await dbPipelines.getPipelineByName(pipelineId);
@@ -811,27 +820,49 @@ export function KanbanBoard() {
           console.error('Error getting pipeline ID:', error);
         }
 
-        const [boardData, user, pipelineList, clientNames] = await Promise.all([
+        const loadAll = Promise.all([
           loadInitialBoardState(pipelineId),
           getCurrentUser(),
           getPipelines(),
           dbCards.getAllClientNames(),
         ]);
+
+        let boardData: BoardState;
+        let user: TeamMember;
+        let pipelineList: Awaited<ReturnType<typeof getPipelines>>;
+        let clientNames: string[];
+
+        try {
+          [boardData, user, pipelineList, clientNames] = await Promise.race([
+            loadAll,
+            new Promise<never>((_, reject) => {
+              setTimeout(
+                () => reject(new Error(`Pipeline load timed out after ${PIPELINE_LOAD_TIMEOUT_MS}ms`)),
+                PIPELINE_LOAD_TIMEOUT_MS
+              );
+            }),
+          ]);
+        } catch (batchError) {
+          console.error('Error loading board data (batch):', batchError);
+          setBoardState(emptyBoard);
+          setCurrentUser(offlineUser);
+          setPipelines([]);
+          setAllClientNames([]);
+          return;
+        }
+
         setBoardState(boardData);
         setCurrentUser(user);
         setPipelines(pipelineList);
         setAllClientNames(clientNames);
-        
-        // Update numeric ID if we got it from boardData
+
         if (!numericId && pipelineList.length > 0) {
           const found = pipelineList.find(p => p.name === pipelineId);
           if (found) {
-            numericId = found.id;
             setPipelineIdNum(found.id);
           }
         }
-        
-        // Load unread count
+
         if (user.id) {
           try {
             const count = await getUnreadNotificationCount(user.id);
@@ -842,6 +873,10 @@ export function KanbanBoard() {
         }
       } catch (error) {
         console.error('Error loading board data:', error);
+        setBoardState(emptyBoard);
+        setCurrentUser(offlineUser);
+        setPipelines([]);
+        setAllClientNames([]);
       } finally {
         setLoading(false);
       }

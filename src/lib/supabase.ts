@@ -32,15 +32,17 @@ export const getSupabaseClient = (): SupabaseClient => {
   return supabaseClient;
 };
 
-// Helper to get the current session
+// Prefer auth.getCurrentSession() — this helper stays non-throwing for legacy callers
 export const getSession = async () => {
   const client = getSupabaseClient();
   const { data: { session }, error } = await client.auth.getSession();
-  if (error) throw error;
-  return session;
+  if (error) {
+    console.warn('supabase.getSession:', error.message);
+    return null;
+  }
+  return session ?? null;
 };
 
-// Helper to get the current user
 export const getCurrentUser = async () => {
   const session = await getSession();
   return session?.user ?? null;
